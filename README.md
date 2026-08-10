@@ -18,11 +18,13 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 msui @ https://github.com/WangYiTao0/msui/releases/download/v0.2.0/msui-0.2.0-py3-none-any.whl
 ```
 
-开发环境另装两个工具（跑闸门测试要 pytest，打包要 pyinstaller；它们不进
-requirements，不随产物分发）：
+另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
+`requirements.txt`**（平台 CI 的 Install deps 步只装 requirements.txt，
+打包就要用它——这是接入契约的要求，不是本仓的偏好）；`pytest` 不进
+requirements——平台 CI 在测试步内现装，本机开发时装一次：
 
 ```
-pip install pytest pyinstaller
+pip install pytest
 ```
 
 ## 2. 最小启动
@@ -35,8 +37,11 @@ pip install pytest pyinstaller
 """msui 最小消费者：页面归自己，共享样式由 msui 启动时落进来。
 
 三步：定位页面目录 → copy_assets 落共享样式 → run 开窗。
-环境变量 APP_SMOKE=1 时隐藏开窗、就绪即关——给 CI/无人值守冒烟用，
-自己的仓不需要这条冒烟缝的话，把 smoke 两行删掉即可。
+页面要调 Python 时把 js_api 对象递给 run（方法包 Serializer：连点丢弃、
+不排队），页面那半边的写法见 pages/index.html 尾部的 <script>。
+环境变量 APP_SMOKE=1 时隐藏开窗、SmokeDriver 自动驾驶一轮（等桥往返、
+核对样式真的生效）后自关——给 CI/无人值守冒烟用；自己的仓不需要冒烟的话，
+把 smoke_script 和 driver 相关几行删掉即可。
 """
 from __future__ import annotations
 
@@ -44,8 +49,26 @@ import os
 import sys
 from pathlib import Path
 
+from msui.bridge import Serializer
 from msui.resources import copy_assets
 from msui.shell import run
+from msui.testing import SmokeDriver
+
+
+class Api:
+    """js_api 桥对象：业务留在 Python，页面只管调用与显示。
+
+    pywebview 对每次前端调用各开一个后台线程（官方文档明说 not
+    thread-safe），方法一律包在 Serializer 里：抢不到锁立即回
+    {"busy": True, ...}，绝不排队——连点五下不会攒成一队。
+    """
+
+    def __init__(self) -> None:
+        self._serial = Serializer()
+
+    def ping(self) -> dict:
+        """页面调一次拿一句应答：{"busy": False, "data": "pong 来自 Python"}。"""
+        return self._serial.run(lambda: "pong 来自 Python")
 
 
 def page_dir() -> Path:
@@ -55,15 +78,32 @@ def page_dir() -> Path:
     return Path(__file__).resolve().parent / "pages"
 
 
+def smoke_script(drive: SmokeDriver, window) -> None:
+    """冒烟脚本（跑在 pywebview 后台线程）：桥往返 + 样式生效各一条断言。
+
+    失败收集、finally 销毁窗口、超时兜底都由 SmokeDriver 骨架代办。
+    """
+    # 桥通：页面在 pywebviewready 后自动 ping 一次，回显来自 Python 的应答
+    got = drive.wait_js(
+        window, "document.getElementById('pong').textContent", "pong 来自 Python"
+    )
+    drive.check(got == "pong 来自 Python", f"桥往返回显不对：{got!r}")
+    # 样式吃进去了：主按钮实测背景色 == --brand token 解出的 rgb
+    drive.check_token_style(window, "button.primary", "backgroundColor", "brand")
+
+
 def main() -> None:
     serve_dir = copy_assets(page_dir())  # 每次启动覆盖落样式，页面永远跟着装的这版 msui 走
-    smoke = os.environ.get("APP_SMOKE") == "1"
+    driver = SmokeDriver(smoke_script) if os.environ.get("APP_SMOKE") == "1" else None
     run(
         serve_dir / "index.html",
+        js_api=Api(),
         title="示例小程序",
-        hidden=smoke,
-        on_ready=(lambda window: window.destroy()) if smoke else None,
+        hidden=driver is not None,
+        on_ready=driver,
     )
+    if driver is not None:
+        driver.exit()  # 有失败：逐条打印后退出码 1；全绿：打印「冒烟通过」
 
 
 if __name__ == "__main__":
@@ -75,8 +115,25 @@ if __name__ == "__main__":
 - `copy_assets` **无条件覆盖**地把 `tokens.css` + `base.css` 落进页面目录并返回
   该开窗的目录——开窗一律用返回值，别写死 `page_dir`；
 - 这两份 css 不入仓、不手改（`pages/.gitignore` 把它们排除掉）；
-- `run(...)` 还收 `js_api=`（后端桥对象）、`width/height/min_size`、`icon=`、
-  `storage_dir=` + `version=`（持久化与按版本清缓存）等关键字参数，按需加。
+- `run(...)` 还收 `width/height/min_size`、`icon=`、`storage_dir=` +
+  `version=`（持久化与按版本清缓存）等关键字参数，按需加。
+
+### 桥的页面侧：三件事
+
+上面 Python 那半边只是把 `js_api=Api()` 递给 `run`、方法包上
+`msui.bridge.Serializer`；页面那半边（完整代码在下一节 index.html 尾部的
+`<script>` 里，可整段照抄）只有三件事：
+
+1. **等 `pywebviewready` 再调**——`window.pywebview` 是窗口起来后才注入的，
+   页面脚本一执行就去调必然 undefined；把首次调用挂在
+   `window.addEventListener("pywebviewready", …)` 上。
+2. **调用返回 Promise**——`window.pywebview.api.ping()` 这样调，`await` 拿到
+   的就是 Python 方法的返回值（必须 JSON 可序列化）。Python 侧抛异常会变成
+   这个 Promise 的 reject，前端 try/catch 兜底显示。
+3. **忙碌信封就地丢弃**——方法包了 `Serializer` 时，应答统一是
+   `{"busy": false, "data": …}` 信封；拿到 `busy: true` 表示上一次调用还在
+   处理中，**就地 `return` 丢弃本次、绝不排队**（排队会把「连点五下」攒成
+   执行五次）。
 
 ## 3. 页面写语义 HTML
 
@@ -110,6 +167,12 @@ if __name__ == "__main__":
     <button class="primary">主操作</button>
     <button>次要操作</button>
   </div>
+  <div class="card">
+    <h2>桥演示</h2>
+    <p>点按钮经 js_api 桥调 Python，应答回显在这里：
+      <output id="pong">（等待 pywebviewready）</output></p>
+    <button id="ping">调一下 Python</button>
+  </div>
   <table>
     <thead><tr><th>名称</th><th>状态</th></tr></thead>
     <tbody>
@@ -118,9 +181,27 @@ if __name__ == "__main__":
     </tbody>
   </table>
   <small>底部弱化文字，带一个<a href="#">链接</a>。</small>
+  <script>
+    // 桥的页面侧三件事（详见 README「桥的页面侧」一节）：
+    // 1. pywebviewready 之后才允许调用（js_api 注入完成的信号）；
+    // 2. window.pywebview.api.xxx() 返回 Promise，await 拿 Python 返回值；
+    // 3. 应答是 Serializer 信封，busy=true 表示上一次还在处理——就地丢弃。
+    const pongEl = document.getElementById("pong");
+    async function ping() {
+      const reply = await window.pywebview.api.ping();
+      if (reply.busy) return; // 忙碌信封：丢弃本次，不排队
+      pongEl.textContent = reply.data;
+    }
+    document.getElementById("ping").addEventListener("click", ping);
+    window.addEventListener("pywebviewready", ping);
+  </script>
 </body>
 </html>
 ```
+
+展示型大读数（计数器、倒计时这类页面的主角数字）给承载元素挂 `.display`
+类：字号走 tokens 的 `--font-display` 档（32px），数字等宽不晃动，照样零
+自定义样式。
 
 ## 4. override.css（默认不用）
 
@@ -198,6 +279,17 @@ a = Analysis(
     excludes=[],
     noarchive=False,
 )
+
+# 开发机上冒烟落地过的 tokens.css / base.css 副本（gitignored、但在盘上）
+# 会被 pages/ 整目录收集顺手带进产物——纯冗余：运行时 copy_assets 每次启动
+# 都无条件覆盖，产物里那两份副本永远不会被用到。按目的地路径剔掉；CI 的
+# 干净 checkout 本来就没有它们，此过滤不改变 CI 产物。
+def _is_landed_css(dest: str) -> bool:
+    parts = dest.replace("\\", "/").split("/")
+    return parts[0] == "pages" and parts[-1] in ("tokens.css", "base.css")
+
+a.datas = [entry for entry in a.datas if not _is_landed_css(entry[0])]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -237,6 +329,13 @@ $env:APP_SMOKE = "1"; .\dist\app\app.exe
 APP_SMOKE=1 ./dist/app/app
 ```
 
+冒烟的自动驾驶骨架是 `msui.testing.SmokeDriver`（上面 app.py 的 APP_SMOKE
+分支就是全部用法），它替你扛下四件容易踩坑的事：`on_ready` 跑在 pywebview
+后台线程、**异常不会变成非零退出码**，所以失败一律收集、`run()` 返回后
+`driver.exit()` 统一判定；桥往返是异步的，用 `wait_js` 轮询等到位；窗口
+销毁在 finally 里，脚本怎么炸都不挂死；外加 watchdog 硬闹钟兜底（默认
+120 秒，到点 `os._exit(2)`）。样式生效断言用 `check_token_style`（见下节）。
+
 msui 落进来的两份样式副本要挡在 git 外——`pages/.gitignore` 写这两行
 （仓里的唯一样式来源是 msui 包，副本入了仓就是漂移源）：
 
@@ -255,6 +354,12 @@ base.css
 
 横幅是 css 注释：tokens 解析整块剔注释、横幅里没有色值，样式闸门不受影响。
 
+两级证明要分清：**横幅只证明 css 落了地**（文件在、版本对），不证明页面
+把它吃进去了（`<link>` 被删、路径写错时横幅照样在）。「页面真的吃进去了」
+用冒烟里的 `SmokeDriver.check_token_style` 断言：把某个 token 解成 rgb、与
+元素实测 computedStyle 比对——砍掉 base.css 的 `<link>` 时它必红。两条各管
+一半，都要有。
+
 ## 给 AI 的转述块
 
 给一个要新建/改造小程序仓的 AI 当引导词，整段粘贴即可：
@@ -263,6 +368,8 @@ base.css
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
    msui @ https://github.com/WangYiTao0/msui/releases/download/v0.2.0/msui-0.2.0-py3-none-any.whl
+   另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
+   要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
    （冻结态 sys._MEIPASS/pages，源码态在启动文件旁）→
    serve_dir = msui.resources.copy_assets(page_dir()) →
@@ -280,6 +387,15 @@ base.css
    datas 只写自己的 ("pages", "pages")。
 8. 版本核对：copy_assets 落下的 css 第一行是 /* msui X.Y.Z */，据此核对产物
    带的 msui 版本。
+9. 页面调 Python（js_api 桥）：Python 侧对象方法包 msui.bridge.Serializer
+   （忙碌信封，连点丢弃不排队）；页面侧等 pywebviewready 事件后经
+   window.pywebview.api.xxx() 调用（返回 Promise），应答 busy=true 就地丢弃。
+10. 冒烟自动驾驶用 msui.testing.SmokeDriver（照抄 msui README §2 的
+    APP_SMOKE 分支）：失败收集与退出码判定、finally 销毁窗口、watchdog
+    超时兜底都由它代办；样式生效断言用它的 check_token_style（token 解成
+    rgb 与元素实测 computedStyle 比对）。
+11. 展示型大读数（计数器主角数字这类）给元素挂 .display 类，字号走
+    --font-display 档，不自己写字号。
 ```
 
 ## 发布（维护者）

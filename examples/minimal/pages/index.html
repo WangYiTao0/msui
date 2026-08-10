@@ -23,6 +23,12 @@
     <button class="primary">主操作</button>
     <button>次要操作</button>
   </div>
+  <div class="card">
+    <h2>桥演示</h2>
+    <p>点按钮经 js_api 桥调 Python，应答回显在这里：
+      <output id="pong">（等待 pywebviewready）</output></p>
+    <button id="ping">调一下 Python</button>
+  </div>
   <table>
     <thead><tr><th>名称</th><th>状态</th></tr></thead>
     <tbody>
@@ -31,5 +37,19 @@
     </tbody>
   </table>
   <small>底部弱化文字，带一个<a href="#">链接</a>。</small>
+  <script>
+    // 桥的页面侧三件事（详见 README「桥的页面侧」一节）：
+    // 1. pywebviewready 之后才允许调用（js_api 注入完成的信号）；
+    // 2. window.pywebview.api.xxx() 返回 Promise，await 拿 Python 返回值；
+    // 3. 应答是 Serializer 信封，busy=true 表示上一次还在处理——就地丢弃。
+    const pongEl = document.getElementById("pong");
+    async function ping() {
+      const reply = await window.pywebview.api.ping();
+      if (reply.busy) return; // 忙碌信封：丢弃本次，不排队
+      pongEl.textContent = reply.data;
+    }
+    document.getElementById("ping").addEventListener("click", ping);
+    window.addEventListener("pywebviewready", ping);
+  </script>
 </body>
 </html>

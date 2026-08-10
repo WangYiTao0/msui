@@ -1,4 +1,7 @@
-"""样式闸门的纯函数库：对比度校验 + 防游离色值扫描。**不依赖 pytest。**
+"""消费者的测试零件：样式闸门纯函数 + 冒烟自动驾驶骨架。**不依赖 pytest。**
+
+两块内容：样式闸门（对比度校验 + 防游离色值扫描，本文件主体）与
+:class:`SmokeDriver`（APP_SMOKE 冒烟的自动驾驶骨架，见类 docstring）。
 
 `tokens.css` 是唯一色源、`base.css` 只经 `var(--…)` 引用——这两条约定要靠
 测试盯着才立得住。本模块把「盯着」所需的全部零件做成可复用的纯函数，消费
@@ -36,10 +39,16 @@
 """
 from __future__ import annotations
 
+import json
+import os
 import re
-from collections.abc import Collection, Iterable, Mapping
+import sys
+import threading
+import time
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .resources import BASE_CSS_NAME, TOKENS_CSS_NAME
 
@@ -53,6 +62,7 @@ __all__ = [
     "OVERRIDE_CSS_NAME",
     "SCANNED_SUFFIXES",
     "SEPARATOR_MINIMUM",
+    "SmokeDriver",
     "TEXT_MINIMUM",
     "TokenPair",
     "contrast_failures",
@@ -135,11 +145,13 @@ def merge_tokens(
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 # tokens.css 里值不是纯 `#rrggbb` 的变量，在这里显式登记、跳过对比度断言。
-# 它们全是 rgba() 半透明晕染：底色、边框、hover 提亮罩这类叠加层，本身不
-# 承担「看得清」的职责——可读性由画在它们上面的实色前景承担，那些前景各自
-# 的组合已在登记表里。每一条都应能在 tokens.css 里对应变量旁找到说明。
+# 两类：rgba() 半透明晕染（底色、边框、hover 提亮罩这类叠加层，本身不承担
+# 「看得清」的职责——可读性由画在它们上面的实色前景承担，那些前景各自的
+# 组合已在登记表里）；以及压根不是颜色的量值 token（字号档）。每一条都应
+# 能在 tokens.css 里对应变量旁找到说明。
 NON_HEX_TOKENS = frozenset(
     {
+        "font-display",  # 展示型大读数的字号档——量值，不是颜色
         "error-bg",  # error 系半透明底
         "error-strip-border",  # error 系半透明边框
         "error-wash",  # error 系 hover 提亮罩
@@ -323,3 +335,149 @@ def format_stray_hex(offenders: Mapping[Path, list[str]]) -> str:
     return "以下文件出现手写十六进制色值，应改用 token 变量：\n" + "\n".join(
         f"  {path}: {matches}" for path, matches in offenders.items()
     )
+
+
+# ---------------------------------------------------------------------------
+# 冒烟自动驾驶骨架
+# ---------------------------------------------------------------------------
+
+
+class SmokeDriver:
+    """APP_SMOKE 冒烟的自动驾驶骨架：当 ``on_ready`` 钩子递给 ``run``。
+
+    第一个真实消费者踩出来的三条纪律，骨架各自代办、消费者不用重新发明：
+
+    - ``on_ready`` 跑在 pywebview 的**后台线程**，里面抛异常不会变成进程的
+      非零退出码——所以失败一律收集进 :attr:`failures`，``run()`` 返回后在
+      主线程调 :meth:`exit` 统一判定退出码；
+    - 桥往返是异步的，断言前用 :meth:`wait_js` 轮询等到位，不 sleep 一个
+      拍脑袋的秒数；
+    - 窗口销毁在 ``finally`` 里，冒烟脚本怎么炸都会销毁——不销毁的话
+      ``run()`` 永不返回，进程挂死连失败都报不出来。
+
+    超时兜底两层：``timeout`` 是 :meth:`wait_js` 的轮询预算（秒，整个脚本
+    共用一个截止时刻，从 ``on_ready`` 触发起算）；``watchdog`` 是硬闹钟——
+    构造时启动、:meth:`exit` 解除，到点直接 ``os._exit(2)``，防 GUI 主循环
+    挂死时连退出码都没有（daemon 定时器，不阻塞正常退出）。
+
+    用法（完整可跑的样子见 examples/minimal/app.py 的 APP_SMOKE 分支）::
+
+        driver = SmokeDriver(smoke_script) if smoke else None
+        run(page, hidden=driver is not None, on_ready=driver)
+        if driver is not None:
+            driver.exit()   # 有失败：逐条打印后 sys.exit(1)；全绿：打印「冒烟通过」
+
+    ``script(driver, window)`` 是消费者自己的冒烟脚本，用 :meth:`wait_js` /
+    :meth:`check` / :meth:`check_token_style` 驱动页面断言。
+    """
+
+    def __init__(
+        self,
+        script: Callable[["SmokeDriver", Any], None],
+        *,
+        timeout: float = 15.0,
+        watchdog: float = 120.0,
+    ) -> None:
+        self._script = script
+        self._timeout = timeout
+        self._deadline: float | None = None
+        self.failures: list[str] = []
+        self._watchdog = threading.Timer(watchdog, self._abort)
+        self._watchdog.daemon = True
+        self._watchdog.start()
+
+    @staticmethod
+    def _abort() -> None:
+        # 走到这儿说明主循环或 destroy 挂死了：正常退出路径已不可用，
+        # os._exit 是唯一还能把非零退出码带出去的口。
+        print("冒烟失败：watchdog 超时，进程疑似挂死", flush=True)
+        os._exit(2)
+
+    def __call__(self, window: Any) -> None:
+        """``on_ready`` 钩子本体（pywebview 后台线程）：跑脚本，finally 销毁窗口。"""
+        self._deadline = time.monotonic() + self._timeout
+        try:
+            self._script(self, window)
+        except Exception as exc:  # 后台线程的异常不自带退出码，收集是唯一出路
+            self.fail(f"冒烟脚本异常：{exc!r}")
+        finally:
+            window.destroy()
+
+    def fail(self, message: str) -> None:
+        """记一条失败。不抛、不打断脚本——能查多少条查多少条。"""
+        self.failures.append(message)
+
+    def check(self, ok: bool, message: str) -> bool:
+        """ok 为假时记失败；返回 ok 本身，方便脚本里串条件。"""
+        if not ok:
+            self.fail(message)
+        return ok
+
+    def wait_js(
+        self, window: Any, script: str, expected: str, *, interval: float = 0.2
+    ) -> str:
+        """轮询 ``evaluate_js`` 直到结果 == expected 或超时；返回最后一次结果。
+
+        截止时刻整个冒烟脚本共用一个（``on_ready`` 触发时定下）——前一步
+        等掉的时间不会给后一步续命。判定交还调用方：拿返回值自己 check，
+        错的时候失败信息里才有「实际是什么」。
+        """
+        if self._deadline is None:  # 脚本外直接调用（罕见）：就地起一个预算
+            self._deadline = time.monotonic() + self._timeout
+        result = window.evaluate_js(script)
+        while result != expected and time.monotonic() < self._deadline:
+            time.sleep(interval)
+            result = window.evaluate_js(script)
+        return result
+
+    def check_token_style(
+        self, window: Any, selector: str, css_property: str, token: str
+    ) -> bool:
+        """断言「页面真的吃进了共享样式」：selector 命中元素的实测
+        ``computedStyle[css_property]`` == token 解出的 rgb。
+
+        版本横幅只证明 css 落了地；这一条证明页面把它**吃进去了**——探针
+        元素把 ``var(--token)`` 的值解成 rgb（浏览器代为归一化，两边同一
+        口径），与元素实测值比对。砍掉 base.css 的 ``<link>`` 时必红
+        （第一个消费者用 mutation 验证过的配方）。
+
+        在页面就绪断言（如 :meth:`wait_js` 等桥往返）之后调用——样式检查
+        本身不轮询。
+        """
+        js = (
+            "(() => {\n"
+            f"  const el = document.querySelector({json.dumps(selector)});\n"
+            "  if (!el) return '|missing';\n"
+            "  const value = getComputedStyle(document.documentElement)\n"
+            f"    .getPropertyValue({json.dumps('--' + token)}).trim();\n"
+            "  const probe = document.createElement('div');\n"
+            "  probe.style.color = value || 'transparent';\n"
+            "  document.body.appendChild(probe);\n"
+            "  const expected = getComputedStyle(probe).color;\n"
+            "  probe.remove();\n"
+            f"  return getComputedStyle(el)[{json.dumps(css_property)}] + '|' + expected;\n"
+            "})()"
+        )
+        outcome = window.evaluate_js(js)
+        actual, _, expected = (outcome or "|").partition("|")
+        if expected == "missing":
+            return self.check(False, f"元素 {selector} 不存在，样式断言没做成")
+        return self.check(
+            bool(expected) and actual == expected,
+            f"{selector} 的 {css_property} 实测 {actual!r}"
+            f" != --{token} 解出的 {expected!r}",
+        )
+
+    def exit(self) -> None:
+        """``run()`` 返回后在主线程调用：解除 watchdog，统一判定退出码。
+
+        有失败：逐条打印后 ``sys.exit(1)``；全绿：打印「冒烟通过」正常返回。
+        print 一律 flush——冻结产物 stdout 重定向到 CI 日志时是块缓冲，
+        不 flush 顺序会乱。
+        """
+        self._watchdog.cancel()
+        if self.failures:
+            for line in self.failures:
+                print(f"冒烟失败：{line}", flush=True)
+            sys.exit(1)
+        print("冒烟通过", flush=True)

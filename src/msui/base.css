@@ -103,6 +103,13 @@ tbody tr:hover { background: var(--card-hover); }
 }
 .card.clickable:active { transform: translateY(0); }
 
+/* ---- 展示型大读数：计数、倒计时这类页面主角数字挂 .display ----
+   tabular-nums 让数字等宽，读数跳动时不左右晃。 */
+.display {
+  font-size: var(--font-display); font-weight: 600;
+  letter-spacing: .02em; font-variant-numeric: tabular-nums;
+}
+
 /* ---- 空态（空清单 / 搜索无结果 / 首次加载） ---- */
 .empty {
   text-align: center; padding: 48px 0 32px; color: var(--muted);

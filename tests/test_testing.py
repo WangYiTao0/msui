@@ -15,7 +15,13 @@ from pathlib import Path
 
 import pytest
 
-from msui.resources import BASE_CSS_NAME, TOKENS_CSS_NAME, parse_tokens, tokens_css_path
+from msui.resources import (
+    BASE_CSS_NAME,
+    TOKENS_CSS_NAME,
+    base_css_path,
+    parse_tokens,
+    tokens_css_path,
+)
 from msui.testing import (
     ALLOWED_HEX_FILE_NAMES,
     BASE_TOKEN_PAIRS,
@@ -117,6 +123,26 @@ def test_every_declared_token_is_either_hex_or_explicitly_whitelisted(
         assert HEX_COLOR_RE.match(value) or name in NON_HEX_TOKENS, (
             f"--{name}: {value!r} 既不是 #rrggbb，也没登记进 NON_HEX_TOKENS"
         )
+
+
+def test_display_font_token_registered_and_base_css_consumes_it(
+    all_tokens: dict[str, str],
+):
+    """展示型字号档（大读数界面用）：--font-display 三处齐活。
+
+    tokens.css 里有它、值是 px 字号（不是色值，所以必须登记进
+    NON_HEX_TOKENS 白名单，否则 hex_tokens 当场炸）、base.css 的 .display
+    类真的消费它——三处少一处，「零自定义样式也能承载大读数」就不成立。
+    """
+    assert all_tokens.get("font-display", "").endswith("px"), (
+        "tokens.css 里缺 --font-display 字号档"
+    )
+    assert "font-display" in NON_HEX_TOKENS, (
+        "--font-display 不是色值，必须登记进 NON_HEX_TOKENS 白名单"
+    )
+    base = base_css_path().read_text(encoding="utf-8")
+    assert ".display" in base, "base.css 里没有承载大读数的 .display 类"
+    assert "var(--font-display)" in base, ".display 的字号必须走 --font-display 档"
 
 
 def test_hex_tokens_raises_on_unregistered_non_hex_value():
