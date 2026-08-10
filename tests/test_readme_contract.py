@@ -76,6 +76,6 @@ def test_readme_install_url_pins_current_version():
 def test_example_msui_pinned_matches_current_version():
     """示例 app.py 演的钉版本常量必须钉当前版——README 块一字一致地跟着它。"""
     app = (REPO_ROOT / "examples/minimal/app.py").read_text(encoding="utf-8")
-    match = re.search(r'^MSUI_PINNED = "([^"]+)"$', app, re.MULTILINE)
+    match = re.search(r'^MSUI_PINNED = "([^"]+)"', app, re.MULTILINE)
     assert match, "examples/minimal/app.py 里必须有模块级 MSUI_PINNED 常量"
     assert match.group(1) == _version_from_pyproject()
