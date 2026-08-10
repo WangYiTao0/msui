@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!--
+  语义 HTML 约定：写裸 button / input / table 就得到统一长相；任何颜色只经
+  var(--token) 取用，不手写十六进制色值（闸门测试盯着）。
+  tokens.css / base.css 不入仓、不手改——启动时由 msui.resources.copy_assets
+  落进本目录（无条件覆盖，头部带 msui 版本横幅）。
+  要换色时才加 override.css：放本目录、只覆写同名 token 变量值，
+  并在 base.css 之后加一行 <link rel="stylesheet" href="override.css">。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>示例小程序</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+</head>
+<body>
+  <h1>示例小程序</h1>
+  <p>下面全是裸标签：没有写任何一行自定义样式，长相来自共享的 base.css。</p>
+  <div class="card">
+    <h2>操作区</h2>
+    <input placeholder="输入点什么">
+    <button class="primary">主操作</button>
+    <button>次要操作</button>
+  </div>
+  <table>
+    <thead><tr><th>名称</th><th>状态</th></tr></thead>
+    <tbody>
+      <tr><td>任务一</td><td>已完成</td></tr>
+      <tr><td>任务二</td><td>进行中</td></tr>
+    </tbody>
+  </table>
+  <small>底部弱化文字，带一个<a href="#">链接</a>。</small>
+</body>
+</html>

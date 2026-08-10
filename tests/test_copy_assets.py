@@ -1,12 +1,14 @@
 """copy_assets：把共享样式落到消费者页面目录（出路二的启动时复制）。
 
-盯五件事：
-1. 两份 css 都复制进页面目录，内容与包内原件一致；
+盯六件事：
+1. 两份 css 都复制进页面目录，内容 = 版本横幅 + 包内原件；
 2. **无条件覆盖**——页面目录里已有旧文件也照覆盖（改了共享包、页面必须跟走）；
 3. 复制不动原件——包内那份仍在、内容不变（Python 侧资源读取继续正常）；
 4. 复制失败必须响——默认（无后备）直接抛 OSError，不许吞；
 5. tempdir 后备是显式开关、默认关；开了才在页面目录写不进时把整个页面
-   复制到临时目录再返回那个目录。
+   复制到临时目录再返回那个目录；
+6. 版本横幅（`/* msui X.Y.Z */`）：落出去的每份 css 第一行就是它，值取包
+   自身安装元数据（版本单一来源），且不影响 tokens 解析与防游离扫描。
 """
 from __future__ import annotations
 
@@ -17,7 +19,16 @@ import sys
 
 import pytest
 
+import msui
 import msui.resources as resources
+from msui import testing as gate
+
+
+def _expected_copy(name: str) -> str:
+    """落出去的那份 css 应有的完整内容：版本横幅 + 包内原件原文。"""
+    return resources.version_banner() + resources.asset_path(name).read_text(
+        encoding="utf-8"
+    )
 
 
 def _make_page_dir(tmp_path):
@@ -35,10 +46,7 @@ def test_copy_assets_copies_both_css_into_page_dir(tmp_path):
     for name in resources.ASSET_NAMES:
         copied = page_dir / name
         assert copied.is_file(), f"页面目录里缺 {name}"
-        original = resources.asset_path(name)
-        assert copied.read_text(encoding="utf-8") == original.read_text(
-            encoding="utf-8"
-        )
+        assert copied.read_text(encoding="utf-8") == _expected_copy(name)
 
 
 def test_copy_assets_overwrites_stale_copies_unconditionally(tmp_path):
@@ -54,7 +62,7 @@ def test_copy_assets_overwrites_stale_copies_unconditionally(tmp_path):
     for name in resources.ASSET_NAMES:
         text = (page_dir / name).read_text(encoding="utf-8")
         assert text != stale, f"{name} 没被覆盖，页面还端着旧样式"
-        assert text == resources.asset_path(name).read_text(encoding="utf-8")
+        assert text == _expected_copy(name)
 
 
 def test_copy_assets_leaves_originals_untouched(tmp_path):
@@ -81,12 +89,14 @@ def test_copy_assets_leaves_originals_untouched(tmp_path):
 
 def test_copy_assets_raises_when_copy_fails(tmp_path, monkeypatch):
     """复制失败必须响：默认（无后备）OSError 原样冒泡，不许裸 except 吞掉。"""
+    from pathlib import Path
+
     page_dir = _make_page_dir(tmp_path)
 
-    def _boom(src, dst, **kwargs):
+    def _boom(self, *args, **kwargs):
         raise OSError("模拟：页面目录写不进")
 
-    monkeypatch.setattr(shutil, "copyfile", _boom)
+    monkeypatch.setattr(Path, "write_text", _boom)
     with pytest.raises(OSError, match="写不进"):
         resources.copy_assets(page_dir)
 
@@ -120,9 +130,7 @@ def test_copy_assets_tempdir_fallback_serves_temp_copy(tmp_path):
     assert (served / "index.html").is_file(), "页面文件没跟着进临时目录"
     for name in resources.ASSET_NAMES:
         assert (served / name).is_file(), f"临时目录里缺 {name}"
-        assert (served / name).read_text(encoding="utf-8") == resources.asset_path(
-            name
-        ).read_text(encoding="utf-8")
+        assert (served / name).read_text(encoding="utf-8") == _expected_copy(name)
     shutil.rmtree(served.parent, ignore_errors=True)
 
 
@@ -138,3 +146,52 @@ def test_copy_assets_fallback_off_still_raises_on_readonly_dir(tmp_path):
             resources.copy_assets(page_dir)
     finally:
         os.chmod(page_dir, 0o755)
+
+
+# ---------------------------------------------------------------------------
+# 版本横幅：从产物文件系统就能读出这份页面带的是哪版 msui
+# ---------------------------------------------------------------------------
+
+
+def test_version_banner_first_line_carries_package_version(tmp_path):
+    """落出去的每份 css 第一行是 `/* msui X.Y.Z */`，版本取包自身元数据。
+
+    这是版本标记的定形实现（消费者契约的一部分）：冻结产物里直接
+    `head -1 pages/tokens.css` 就能读出 msui 版本，页面 devtools 的
+    Sources 面板里也看得见；不新增第二个版本来源。
+    """
+    page_dir = _make_page_dir(tmp_path)
+    resources.copy_assets(page_dir)
+
+    for name in resources.ASSET_NAMES:
+        first_line = (page_dir / name).read_text(encoding="utf-8").splitlines()[0]
+        assert first_line == f"/* msui {msui.get_version()} */", (
+            f"{name} 第一行不是版本横幅：{first_line!r}"
+        )
+
+
+def test_version_banner_does_not_disturb_tokens_or_gates(tmp_path):
+    """横幅是 css 注释：tokens 解析结果与原件一字不差，防游离扫描也不误报。
+
+    防的是「加了标记、闸门先红」：parse_tokens 本就整块剔注释，横幅里也
+    没有十六进制色值——这两点在这里钉死，将来改横幅措辞时不许破坏。
+    """
+    page_dir = _make_page_dir(tmp_path)
+    resources.copy_assets(page_dir)
+
+    stamped = resources.parse_tokens(
+        (page_dir / resources.TOKENS_CSS_NAME).read_text(encoding="utf-8")
+    )
+    original = resources.parse_tokens(
+        resources.tokens_css_path().read_text(encoding="utf-8")
+    )
+    assert stamped == original
+
+    # 页面目录里只有横幅版副本 + index.html：扫描必须干净
+    assert gate.scan_stray_hex(page_dir) == {}
+
+
+def test_version_banner_single_source_is_package_metadata(monkeypatch):
+    """横幅版本值 == msui.get_version()——伪造元数据版本，横幅必须跟着走。"""
+    monkeypatch.setattr(msui, "get_version", lambda: "9.9.9")
+    assert resources.version_banner() == "/* msui 9.9.9 */\n"

@@ -120,15 +120,16 @@ def on_ready(window) -> None:  # noqa: ANN001 - pywebview Window，探针不引�
         )
 
         # 待验条款①的硬核部分：窗口开着、css 已被 WebView2 加载的状态下覆盖写。
-        # 先写坏再 copy_assets，读回内容 == 包内原件，证明覆盖真的发生了
-        # （不然「覆盖同样内容」分辨不出写没写进去）。
+        # 先写坏再 copy_assets，读回内容 == 版本横幅 + 包内原件，证明覆盖真的
+        # 发生了（不然「覆盖同样内容」分辨不出写没写进去）。
         target = page_dir() / resources.TOKENS_CSS_NAME
         try:
             target.write_text("/* stale-while-open */", encoding="utf-8")
             resources.copy_assets(page_dir())
-            overwritten = target.read_text(
+            expected = resources.version_banner() + resources.tokens_css_path().read_text(
                 encoding="utf-8"
-            ) == resources.tokens_css_path().read_text(encoding="utf-8")
+            )
+            overwritten = target.read_text(encoding="utf-8") == expected
             check("overwrite_while_open", overwritten, "ok" if overwritten else "内容没换过来")
         except OSError as exc:
             check("overwrite_while_open", False, f"OSError: {exc}")
@@ -175,7 +176,12 @@ def main() -> int:
     for name in resources.ASSET_NAMES:
         check(f"copied_{name}", (pd / name).is_file(), str(pd / name))
 
-    # 验收 7：复制不动原件——Python 侧资源读取在冻结产物里仍正常
+    # 版本标记：落出去的 css 第一行就是 `/* msui X.Y.Z */`——冻结产物的
+    # 文件系统里直接可读，值必须与元数据版本一致（单一来源）。
+    banner_line = (pd / resources.TOKENS_CSS_NAME).read_text(encoding="utf-8").splitlines()[0]
+    check("version_banner", banner_line == f"/* msui {version} */", banner_line)
+
+    # 复制不动原件——Python 侧资源读取在冻结产物里仍正常
     tokens_path = resources.tokens_css_path()
     check(
         "python_side_tokens_readable",

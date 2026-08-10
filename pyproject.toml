@@ -3,11 +3,10 @@ name = "msui"
 # 版本号**只写这里一处**（tests/test_version.py 盯着这个单一来源）。
 # 发布：git tag v<这个号> && git push origin v<这个号>，
 # CI 在装依赖之前核对 tag 与这里一致，不一致当场 fail（scripts/check_tag_version.py）。
-version = "0.1.0"
+version = "0.2.0"
 description = "小程序共享 UI 运行时与样式（pywebview + WebView2）——骨架先行，功能后续迁入"
 readme = "README.md"
-# 与主仓 MSToolbox 对齐（那边因 tomllib 定了 3.11）；本包将来要被同一批小程序装，
-# 下限不该比主仓更松。
+# 本包要被同一批小程序装，下限与它们的运行环境对齐（3.11 起有 tomllib）。
 requires-python = ">=3.11"
 # shell.run 要开 pywebview 窗口（import 在 run() 函数体内，没装也能 import
 # 本包，但作为发行版依赖必须声明——装了 msui 就该装得上开窗的底座）。
@@ -36,4 +35,6 @@ packages = ["src/msui"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
-testpaths = ["tests"]
+# examples 也进测试路径：示例里的闸门测试在本仓 CI 就得跑绿——README 让
+# 下游照抄的东西，本仓自己先抄着跑一遍。
+testpaths = ["tests", "examples"]

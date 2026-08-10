@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 # 冻结冒烟探针的 spec。**关键点：这里对 msui 的资源与元数据零配置**——
 # tokens.css / base.css / dist-info 全由 msui 包自带的 pyinstaller40 hook
-# （src/msui/_pyinstaller/hook-msui.py）收齐，这正是本票的验收对象。
+# （src/msui/_pyinstaller/hook-msui.py）收齐，这正是被验的机制本身。
 # datas 只声明探针自己持有的页面目录（出路二：页面归消费者）。
 import os
 

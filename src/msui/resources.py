@@ -35,6 +35,7 @@ __all__ = [
     "copy_assets",
     "parse_tokens",
     "tokens_css_path",
+    "version_banner",
 ]
 
 _log = logging.getLogger(__name__)
@@ -92,14 +93,34 @@ def asset_path(name: str) -> Path:
     return candidates[-1]
 
 
+def version_banner() -> str:
+    """落进页面目录的每份 css 头部预置的版本横幅：``/* msui X.Y.Z */``。
+
+    这是消费者契约里的版本标记：产物文件系统里 ``head -1 pages/tokens.css``
+    直接可读，页面 devtools 的 Sources 面板里也看得见。版本值取
+    :func:`msui.get_version`（安装元数据，单一来源）——未安装/元数据缺失时
+    横幅如实写 ``0.0.0+unknown``，不冒充正常号。
+
+    形态是 css 注释：`parse_tokens` 整块剔注释、横幅里没有十六进制色值，
+    所以 tokens 解析与样式闸门都不受它影响（tests/test_copy_assets.py 钉着）。
+    """
+    import msui
+
+    return f"/* msui {msui.get_version()} */\n"
+
+
 def _copy_assets_into(target_dir: Path) -> None:
-    """把全部静态资产覆盖复制进 `target_dir`；任何一步失败原样抛 OSError。"""
+    """把全部静态资产覆盖复制进 `target_dir`（头部加版本横幅）；
+    任何一步失败原样抛 OSError。"""
+    banner = version_banner()
     for name in ASSET_NAMES:
-        shutil.copyfile(asset_path(name), target_dir / name)
+        source_text = asset_path(name).read_text(encoding="utf-8")
+        (target_dir / name).write_text(banner + source_text, encoding="utf-8")
 
 
 def copy_assets(page_dir: str | Path, *, tempdir_fallback: bool = False) -> Path:
-    """把包内 tokens.css + base.css 复制到消费者的页面目录，返回该开窗的目录。
+    """把包内 tokens.css + base.css 复制到消费者的页面目录（每份头部预置
+    :func:`version_banner` 版本横幅），返回该开窗的目录。
 
     这是「出路二」的落地动作（小程序自己持有页面，msui 启动时把共享样式落
     过去）：pywebview 的服务根 = 页面所在目录，任何相对路径出不了服务根，

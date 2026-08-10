@@ -1,7 +1,7 @@
 """发布闸门：核对 tag 版本与 pyproject.toml 的 version 逐字符一致。
 
-沿用主仓 MSToolbox build-windows.yml 的做法：CI 在**装任何依赖之前**跑这一步，
-tag 打错版本号当场 fail，不浪费后面的构建与发布步骤。
+CI 在**装任何依赖之前**跑这一步：tag 打错版本号当场 fail，
+不浪费后面的构建与发布步骤。
 只用标准库（tomllib，3.11+），裸 Python 就能跑。
 
 用法：python scripts/check_tag_version.py v1.2.3 pyproject.toml

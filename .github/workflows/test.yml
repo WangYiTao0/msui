@@ -1,5 +1,4 @@
-# push / PR 都跑全量测试。msui 是公开仓，Actions 分钟数免费，
-# 不必像主仓 MSToolbox 那样为省钱只认 build/** 分支。
+# push / PR 都跑全量测试。msui 是公开仓，Actions 分钟数免费，不必省着跑。
 name: test
 
 on:

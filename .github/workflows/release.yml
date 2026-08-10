@@ -1,16 +1,14 @@
 # 推 v<版本号> tag → 版本闸门 → 测试 → 构建 wheel → 发到**本仓** Release。
 #
-# 与主仓 MSToolbox 不同的两点：
+# 两个要点：
 #   - 发布目标就是本仓（msui 本身是公开仓，匿名可下），不跨仓，
 #     所以用自带 GITHUB_TOKEN 即可，零 PAT、零 secret；
-#   - 产物是纯 Python wheel，ubuntu 一台就够，没有 Windows 打包链。
+#   - 版本闸门在**装任何依赖之前**跑——scripts/check_tag_version.py 只用
+#     标准库，tag 与 pyproject.toml 版本不一致当场 fail，不浪费后面的步骤。
 #
-# 相同的一点（照抄主仓做法）：版本闸门在**装任何依赖之前**跑——
-# scripts/check_tag_version.py 只用标准库，tag 与 pyproject.toml 版本
-# 不一致当场 fail，不浪费后面的步骤。
-#
+# 产物是纯 Python wheel，ubuntu 一台就够，没有 Windows 打包链。
 # 下游安装（钉版本的 wheel URL，无凭据 pip install）：
-#   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.1.0/msui-0.1.0-py3-none-any.whl
+#   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.2.0/msui-0.2.0-py3-none-any.whl
 name: release
 
 on:
@@ -41,7 +39,7 @@ jobs:
           python scripts/check_tag_version.py "$TAG" pyproject.toml
 
       - name: 4/6 装依赖 + pytest 全量
-        # 发给下游装的版本，测试红了不该照样发出去（沿用主仓 release needs test 的原则）
+        # 发给下游装的版本，测试红了不该照样发出去
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
