@@ -13,6 +13,11 @@ requires-python = ">=3.11"
 # 本包，但作为发行版依赖必须声明——装了 msui 就该装得上开窗的底座）。
 dependencies = ["pywebview"]
 
+# PyInstaller 的 hook 发现入口：下游 spec 一行资源配置都不写也能收齐
+# 本包的静态资产与版本元数据（hook 内容见 src/msui/_pyinstaller/hook-msui.py）。
+[project.entry-points.pyinstaller40]
+hook-dirs = "msui._pyinstaller:get_hook_dirs"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",

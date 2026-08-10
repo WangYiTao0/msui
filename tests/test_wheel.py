@@ -45,3 +45,17 @@ def test_wheel_contains_msui_package(tmp_path):
     # 换构建后端或改打包配置时资产悄悄掉出去会当场红。
     assert "msui/tokens.css" in names, f"wheel 里没有 tokens.css，实际内容：{names}"
     assert "msui/base.css" in names, f"wheel 里没有 base.css，实际内容：{names}"
+
+    # PyInstaller hook 也必须进 wheel：hook-msui.py 文件名带连字符、不是可
+    # import 的模块，构建后端会不会收它同样是实测行为——掉出去的话下游冻结
+    # 产物就收不齐资源，且 CI 全绿（hook 发现是运行 pyinstaller 时的事）。
+    assert "msui/_pyinstaller/__init__.py" in names, "wheel 里没有 _pyinstaller 包"
+    assert "msui/_pyinstaller/hook-msui.py" in names, "wheel 里没有 hook-msui.py"
+
+    # entry point 登记也要跟着进 dist-info——PyInstaller 靠它发现 hook 目录，
+    # 少了这条下游 spec 零配置就不成立。
+    entry_points = zipfile.ZipFile(whl).read(
+        f"msui-{version}.dist-info/entry_points.txt"
+    ).decode("utf-8")
+    assert "[pyinstaller40]" in entry_points
+    assert "hook-dirs = msui._pyinstaller:get_hook_dirs" in entry_points

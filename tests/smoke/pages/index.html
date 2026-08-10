@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<!--
+  冻结冒烟探针页面：三份 css 全部同目录相对引用。
+  tokens.css / base.css 不在仓里——它们由 msui.resources.copy_assets 在
+  探针启动时落进本目录（无条件覆盖），这正是被验的机制本身。
+  same.css 是仓里带着的对照组：探针连它的读数都取不到，说明探针自己坏了，
+  与共享样式无关。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>msui freeze smoke probe</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="same.css">
+</head>
+<body>
+  <h1>msui 冻结冒烟探针</h1>
+  <p>body 底色应为 var(--win)，链接色应为 var(--info)。</p>
+  <a id="probe-link" href="#">共享样式染色的链接</a>
+  <div id="control">对照组：same.css 直写色</div>
+</body>
+</html>

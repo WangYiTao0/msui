@@ -16,8 +16,12 @@
 """
 from __future__ import annotations
 
+import logging
 import re
+import shutil
+import stat
 import sys
+import tempfile
 from pathlib import Path
 
 __all__ = [
@@ -28,9 +32,12 @@ __all__ = [
     "asset_datas",
     "asset_path",
     "base_css_path",
+    "copy_assets",
     "parse_tokens",
     "tokens_css_path",
 ]
+
+_log = logging.getLogger(__name__)
 
 # 资产文件名 —— 只写这一处，别处从这里取。
 TOKENS_CSS_NAME = "tokens.css"
@@ -83,6 +90,61 @@ def asset_path(name: str) -> Path:
         if candidate.is_file():
             return candidate
     return candidates[-1]
+
+
+def _copy_assets_into(target_dir: Path) -> None:
+    """把全部静态资产覆盖复制进 `target_dir`；任何一步失败原样抛 OSError。"""
+    for name in ASSET_NAMES:
+        shutil.copyfile(asset_path(name), target_dir / name)
+
+
+def copy_assets(page_dir: str | Path, *, tempdir_fallback: bool = False) -> Path:
+    """把包内 tokens.css + base.css 复制到消费者的页面目录，返回该开窗的目录。
+
+    这是「出路二」的落地动作（小程序自己持有页面，msui 启动时把共享样式落
+    过去）：pywebview 的服务根 = 页面所在目录，任何相对路径出不了服务根，
+    所以样式必须与页面同目录——页面里 ``<link href="tokens.css">`` 相对引用
+    即生效。
+
+    三条纪律：
+
+      - **无条件覆盖**。禁止 if-not-exists——那会造成「改了共享包、页面还是
+        旧样式」。每次启动都覆盖，页面样式永远跟着装的这版 msui 走。
+      - **复制不动原件**。包内那份照常在原地（`tokens_css_path()` 等继续
+        可读）——这是定案选「启动时复制」而不是移动/软链的核心理由。
+      - **失败必须响**。页面目录写不进（只读安装位、权限问题）时 OSError
+        原样冒泡，绝不裸 except 吞掉——样式没落下去还静默开窗，用户看到的
+        是一个裸 HTML 窗口，比崩溃更难排查。
+
+    `tempdir_fallback` 是显式开关、**默认关**：开了之后，页面目录写不进时
+    把整个页面目录 + 样式复制到一次性临时目录，返回那个临时目录（调用方拿
+    返回值去开窗，别写死 page_dir）；后备本身也失败就照常抛。默认关是刻意
+    的——后备把「装在只读位置」这个事实藏起来了，消费方应当先知道自己装在
+    哪，确认需要后备再显式打开。
+    """
+    page_dir = Path(page_dir)
+    try:
+        _copy_assets_into(page_dir)
+        return page_dir
+    except OSError:
+        if not tempdir_fallback:
+            raise
+        _log.warning(
+            "样式复制进页面目录失败，启用 tempdir 后备（页面目录：%s）",
+            page_dir,
+            exc_info=True,
+        )
+
+    staging = Path(tempfile.mkdtemp(prefix="msui-pages-"))
+    serve_dir = staging / (page_dir.name or "pages")
+    shutil.copytree(page_dir, serve_dir)
+    # copytree 会连只读位一起抄过来——而走到后备这里，多半正因为源目录只读。
+    # 临时副本必须可写（马上要往里落样式），把整棵副本的属主写位补回来。
+    for child in [serve_dir, *serve_dir.rglob("*")]:
+        child.chmod(child.stat().st_mode | stat.S_IWUSR)
+    _copy_assets_into(serve_dir)
+    _log.info("tempdir 后备生效，页面改从 %s 端出", serve_dir)
+    return serve_dir
 
 
 def tokens_css_path() -> Path:
