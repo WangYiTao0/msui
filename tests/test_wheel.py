@@ -39,3 +39,9 @@ def test_wheel_contains_msui_package(tmp_path):
 
     names = zipfile.ZipFile(whl).namelist()
     assert "msui/__init__.py" in names, f"wheel 里没有 msui 包，实际内容：{names}"
+
+    # 两份样式资产也必须进 wheel。hatchling 把包目录里的非 .py 文件一并收进
+    # wheel 是实测行为、不是官方文档承诺——所以这里真构建一次、解包断言钉死，
+    # 换构建后端或改打包配置时资产悄悄掉出去会当场红。
+    assert "msui/tokens.css" in names, f"wheel 里没有 tokens.css，实际内容：{names}"
+    assert "msui/base.css" in names, f"wheel 里没有 base.css，实际内容：{names}"

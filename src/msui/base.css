@@ -1,0 +1,117 @@
+/*
+ * 通用组件的默认长相（深色）。搭配 tokens.css 使用：色彩一律 `var(--xxx)`
+ * 引用，本文件不许出现字面色值（十六进制 / rgb() / hsl()），有测试盯着。
+ *
+ * 覆盖：排版、按钮、输入框、表格、卡片、空态。两条原则：
+ *   1. 语义化标签（button / input / table…）直接给默认样式，裸 HTML 就长对；
+ *   2. 类名中性（.btn / .card / .input / .empty），不含任何业务语义。
+ */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ---- 排版 ---- */
+/* html 与 body 都显式染 --win：内嵌浏览器的过滚动/越界区域露出来的是 html
+   的底，不染的话深色窗里会闪白边。 */
+html, body { height: 100%; background: var(--win); }
+body {
+  color: var(--text);
+  font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+h1 { font-size: 18px; font-weight: 600; letter-spacing: .01em; }
+h2 { font-size: 15px; font-weight: 600; }
+h3 { font-size: 13px; font-weight: 600; }
+p { color: var(--text-dim); line-height: 1.6; }
+small { font-size: 12px; color: var(--muted); }
+a { color: var(--info); text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr { border: 0; border-top: 1px solid var(--border); }
+
+/* 滚动条：不限定在某个容器上，任何滚动区都同一套；track/corner 染 --win
+   与窗口底融为一体，thumb 沿用分隔线的 hover 色。 */
+::-webkit-scrollbar { width: 10px; }
+::-webkit-scrollbar-track { background: var(--win); }
+::-webkit-scrollbar-corner { background: var(--win); }
+::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 999px; }
+
+/* ---- 按钮：裸 <button> 与 .btn 同一副长相 ---- */
+button, .btn {
+  font: inherit; font-size: 12px; padding: 5px 14px; border-radius: 7px;
+  cursor: pointer;
+  border: 1px solid var(--border-hover); background: transparent;
+  color: var(--text-dim);
+  transition: color 150ms ease-out, background 150ms ease-out,
+              transform 150ms ease-out;
+}
+button:hover, .btn:hover { color: var(--text); background: var(--wash); }
+button:active, .btn:active { transform: scale(.97); }
+button:disabled, .btn:disabled {
+  cursor: default; opacity: .5; transform: none;
+}
+button:disabled:hover, .btn:disabled:hover {
+  color: var(--text-dim); background: transparent;
+}
+/* 主按钮：品牌色底，一个界面里同时最多一个 */
+button.primary, .btn.primary {
+  background: var(--brand); border-color: var(--brand);
+  color: var(--text); font-weight: 600;
+}
+button.primary:hover, .btn.primary:hover { background: var(--brand-down); }
+
+/* ---- 输入框：裸 <input>/<textarea>/<select> 与 .input 同一副长相 ---- */
+input, textarea, select, .input {
+  font: inherit; font-size: 13px; color: var(--text);
+  padding: 7px 12px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  outline: 0;
+  transition: border-color 150ms ease-out;
+}
+input:focus, textarea:focus, select:focus, .input:focus-within {
+  border-color: var(--border-hover);
+}
+input::placeholder, textarea::placeholder { color: var(--muted); }
+
+/* ---- 表格 ---- */
+table {
+  width: 100%; border-collapse: collapse;
+  font-size: 13px;
+}
+th {
+  text-align: left; padding: 8px 12px;
+  font-size: 11px; font-weight: 600; letter-spacing: .08em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+tbody tr:hover { background: var(--card-hover); }
+
+/* ---- 卡片 ---- */
+.card {
+  border: 1px solid var(--border); background: var(--card); border-radius: 10px;
+  padding: 14px 16px;
+  transition: transform 150ms ease-out, border-color 150ms ease-out,
+              background 150ms ease-out;
+}
+.card.clickable { cursor: pointer; }
+.card.clickable:hover {
+  transform: translateY(-2px);
+  border-color: var(--border-hover); background: var(--card-hover);
+}
+.card.clickable:active { transform: translateY(0); }
+
+/* ---- 空态（空清单 / 搜索无结果 / 首次加载） ---- */
+.empty {
+  text-align: center; padding: 48px 0 32px; color: var(--muted);
+}
+.empty .icon { font-size: 26px; margin-bottom: 10px; }
+.empty .title { font-size: 13px; margin-bottom: 6px; }
+.empty .detail { font-size: 12px; color: var(--muted); }
+
+/* ---- 动效可关：系统偏好「减少动态效果」时全体静止 ---- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
