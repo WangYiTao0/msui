@@ -37,6 +37,10 @@ jobs:
   freeze-smoke:
     name: freeze smoke (windows)
     runs-on: windows-latest
+    env:
+      # Windows runner 控制台默认 cp1252，本仓脚本/测试/探针的输出带中文，
+      # 不开 UTF-8 模式会 UnicodeEncodeError（PyInstaller bootloader 也认这个变量）
+      PYTHONUTF8: "1"
     steps:
       - name: 1/5 取代码
         uses: actions/checkout@v4

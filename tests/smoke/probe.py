@@ -32,6 +32,13 @@ from msui.shell import run
 TIMEOUT_SECONDS = 120
 EXPECTED_VERSION_ENV = "MSUI_EXPECTED_VERSION"
 
+# Windows 控制台默认 cp1252，本探针输出带中文——自己把 stdout/stderr 掰成
+# UTF-8，不指望调用方记得设 PYTHONUTF8（errors="replace" 保底：宁可读数里
+# 出问号，不许探针因为打印这一步炸掉）。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 # 期望读数——来源见注释；getComputedStyle 的色值序列化按 CSSOM 规范是
 # "rgb(r, g, b)"，这里同时容忍 "rgba(r, g, b, 1)" 写法（去空白后比较）。
 EXPECTED_BODY_BG = "#141417"  # tokens.css --win，经 base.css `body { background: var(--win) }`
