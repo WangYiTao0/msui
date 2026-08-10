@@ -40,8 +40,8 @@ pip install pytest
 页面要调 Python 时把 js_api 对象递给 run（方法包 Serializer：连点丢弃、
 不排队），页面那半边的写法见 pages/index.html 尾部的 <script>。
 环境变量 APP_SMOKE=1 时隐藏开窗、SmokeDriver 自动驾驶一轮（等桥往返、
-核对样式真的生效）后自关——给 CI/无人值守冒烟用；自己的仓不需要冒烟的话，
-把 smoke_script 和 driver 相关几行删掉即可。
+核对样式真的生效、横幅钉住版本）后自关——给 CI/无人值守冒烟用；自己的仓
+不需要冒烟的话，把 make_smoke_script 和 driver 相关几行删掉即可。
 """
 from __future__ import annotations
 
@@ -53,6 +53,11 @@ from msui.bridge import Serializer
 from msui.resources import copy_assets
 from msui.shell import run
 from msui.testing import SmokeDriver
+
+# 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
+# msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
+# 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
+MSUI_PINNED = "0.4.0"
 
 
 class Api:
@@ -78,33 +83,48 @@ def page_dir() -> Path:
     return Path(__file__).resolve().parent / "pages"
 
 
-def smoke_script(drive: SmokeDriver, window) -> None:
-    """冒烟脚本（跑在 pywebview 后台线程）：桥往返、样式生效、版式地基。
+def make_smoke_script(serve_dir: Path):
+    """造冒烟脚本（跑在 pywebview 后台线程）：桥往返、样式生效、版式地基、横幅钉版。
 
-    失败收集、finally 销毁窗口、超时兜底都由 SmokeDriver 骨架代办。
+    失败收集、finally 销毁窗口、超时兜底都由 SmokeDriver 骨架代办。页面探针
+    一律写成 null-safe（先判 querySelector 结果再取样式）：元素缺席时报出的
+    是「missing」而不是烧满轮询预算后的一串异常文本。
     """
-    # 桥通：页面在 pywebviewready 后自动 ping 一次，回显来自 Python 的应答
-    got = drive.wait_js(
-        window, "document.getElementById('pong').textContent", "pong 来自 Python"
-    )
-    drive.check(got == "pong 来自 Python", f"桥往返回显不对：{got!r}")
-    # 样式吃进去了：主按钮实测背景色 == --brand token 解出的 rgb
-    drive.check_token_style(window, "button.primary", "backgroundColor", "brand")
-    # 版式地基生效：内容不贴窗框（body 非零内边距）、大读数居中吃 48px 档
-    pad = drive.wait_js(window, "getComputedStyle(document.body).paddingLeft", "24px")
-    drive.check(pad == "24px", f"body 左内边距该是 24px（--space-5），实测 {pad!r}")
-    readout = drive.wait_js(
-        window,
-        "(() => { const d = getComputedStyle(document.querySelector('.display'));"
-        " return d.textAlign + ' ' + d.fontSize; })()",
-        "center 48px",
-    )
-    drive.check(readout == "center 48px", f".display 该居中吃 48px 档，实测 {readout!r}")
+
+    def smoke_script(drive: SmokeDriver, window) -> None:
+        # 桥通：页面在 pywebviewready 后自动 ping 一次，回显来自 Python 的应答
+        got = drive.wait_js(
+            window, "document.getElementById('pong').textContent", "pong 来自 Python"
+        )
+        drive.check(got == "pong 来自 Python", f"桥往返回显不对：{got!r}")
+        # 样式吃进去了：主按钮实测背景色 == --brand token 解出的 rgb
+        drive.check_token_style(window, "button.primary", "backgroundColor", "brand")
+        # 版式地基生效：内容不贴窗框（body 非零内边距）、大读数居中吃 48px 档
+        pad = drive.wait_js(window, "getComputedStyle(document.body).paddingLeft", "24px")
+        drive.check(pad == "24px", f"body 左内边距该是 24px（--space-5），实测 {pad!r}")
+        readout = drive.wait_js(
+            window,
+            "(() => { const el = document.querySelector('.display');"
+            " if (!el) return 'missing'; const d = getComputedStyle(el);"
+            " return d.textAlign + ' ' + d.fontSize; })()",
+            "center 48px",
+        )
+        drive.check(readout == "center 48px", f".display 该居中吃 48px 档，实测 {readout!r}")
+        # 横幅钉版：落地 css 第一行 == "/* msui <钉的版本> */"。横幅只证明
+        # css 落了地，「页面吃进去了」由上面 check_token_style 证明，两条各管一半。
+        banner = (serve_dir / "tokens.css").read_text(encoding="utf-8").splitlines()[0]
+        drive.check(
+            banner == f"/* msui {MSUI_PINNED} */",
+            f"tokens.css 横幅该是 '/* msui {MSUI_PINNED} */'，实测 {banner!r}",
+        )
+
+    return smoke_script
 
 
 def main() -> None:
     serve_dir = copy_assets(page_dir())  # 每次启动覆盖落样式，页面永远跟着装的这版 msui 走
-    driver = SmokeDriver(smoke_script) if os.environ.get("APP_SMOKE") == "1" else None
+    smoke = os.environ.get("APP_SMOKE") == "1"
+    driver = SmokeDriver(make_smoke_script(serve_dir)) if smoke else None
     run(
         serve_dir / "index.html",
         js_api=Api(),
@@ -125,6 +145,10 @@ if __name__ == "__main__":
 - `copy_assets` **无条件覆盖**地把 `tokens.css` + `base.css` 落进页面目录并返回
   该开窗的目录——开窗一律用返回值，别写死 `page_dir`；
 - 这两份 css 不入仓、不手改（`pages/.gitignore` 把它们排除掉）；
+- 钉版本的官方姿势就是上面的 `MSUI_PINNED` 常量 + 横幅断言：**钉死常量证明
+  「产物带的确实是钉的这一版」，改读 `importlib.metadata` 只是回显装了哪版、
+  永远绿**——升级 msui 时改两处（requirements 的 wheel URL + 这个常量），
+  冒烟红了就是有一处忘了改；
 - `run(...)` 还收 `width/height/min_size`、`icon=`、`storage_dir=` +
   `version=`（持久化与按版本清缓存）等关键字参数，按需加。
 
@@ -382,6 +406,13 @@ APP_SMOKE=1 ./dist/app/app
 销毁在 finally 里，脚本怎么炸都不挂死；外加 watchdog 硬闹钟兜底（默认
 120 秒，到点 `os._exit(2)`）。样式生效断言用 `check_token_style`（见下节）。
 
+`wait_js` 两条行为要知道：页面探针表达式抛异常（典型：`querySelector` 返回
+null 被直接 `getComputedStyle`）时**不中断整场**——异常文本当结果值返回，
+那条 check 正常报「实测=<异常文本>」，剩余断言照跑；整个冒烟脚本共用一个
+超时预算，**注定等不到的期望会烧满剩余预算才放行**（失败路径变慢是设计
+使然，不为失败开小灶）——所以探针尽量写成 null-safe（照上面 `.display`
+那段先判元素再取样式），元素缺席时报出的是 `missing` 而不是一串异常文本。
+
 msui 落进来的两份样式副本要挡在 git 外——`pages/.gitignore` 写这两行
 （仓里的唯一样式来源是 msui 包，副本入了仓就是漂移源）：
 
@@ -431,8 +462,10 @@ base.css
    contrast_failures 对比度 + scan_stray_hex 防游离色值。
 7. PyInstaller spec 里对 msui 零资源配置（包自带 hook 收齐样式与元数据），
    datas 只写自己的 ("pages", "pages")。
-8. 版本核对：copy_assets 落下的 css 第一行是 /* msui X.Y.Z */，据此核对产物
-   带的 msui 版本。
+8. 版本核对：copy_assets 落下的 css 第一行是 /* msui X.Y.Z */。冒烟里定义
+   常量 MSUI_PINNED（与 requirements 的 wheel URL 版本一致，升级时两处一起
+   改）并断言横幅 == "/* msui <MSUI_PINNED> */"——钉死常量证明产物带的是
+   钉的这一版，不改读 importlib.metadata（那只是回显、永远绿）。
 9. 页面调 Python（js_api 桥）：Python 侧对象方法包 msui.bridge.Serializer
    （忙碌信封，连点丢弃不排队）；页面侧等 pywebviewready 事件后经
    window.pywebview.api.xxx() 调用（返回 Promise），应答 busy=true 就地丢弃。

@@ -420,21 +420,47 @@ class SmokeDriver:
             self.fail(message)
         return ok
 
+    @staticmethod
+    def _evaluate(window: Any, script: str) -> str:
+        """``evaluate_js`` 一拍：页面探针抛 JavascriptException 时把异常文本
+        当结果值返回，别的异常照旧穿透。
+
+        按**异常类名字符串**识别而不 ``import webview``：msui.testing 承诺
+        不依赖 pywebview 也能用于纯逻辑测试（本文件顶层没有 webview 依赖，
+        这里也不能引入——哪怕延迟 import，没装 pywebview 的环境一异常就
+        ImportError，反而把归因砸了）。pywebview 的 JavascriptException
+        直接继承 Exception、类名稳定，名字就是充分判据。
+        """
+        try:
+            return window.evaluate_js(script)
+        except Exception as exc:
+            if type(exc).__name__ != "JavascriptException":
+                raise
+            return f"JavascriptException: {exc}"
+
     def wait_js(
         self, window: Any, script: str, expected: str, *, interval: float = 0.2
     ) -> str:
         """轮询 ``evaluate_js`` 直到结果 == expected 或超时；返回最后一次结果。
 
         截止时刻整个冒烟脚本共用一个（``on_ready`` 触发时定下）——前一步
-        等掉的时间不会给后一步续命。判定交还调用方：拿返回值自己 check，
-        错的时候失败信息里才有「实际是什么」。
+        等掉的时间不会给后一步续命。反过来说，**注定等不到的期望会烧满
+        剩余预算才放行**（失败路径变慢是设计使然：共享截止时刻不为失败
+        开小灶）。判定交还调用方：拿返回值自己 check，错的时候失败信息里
+        才有「实际是什么」。
+
+        页面探针表达式抛异常（典型：``querySelector`` 返回 null 被直接
+        ``getComputedStyle``）时，pywebview 重抛 JavascriptException——这里
+        把异常文本当结果值继续轮询（元素晚些出现照样等得到），超时后返回
+        它，让调用方的 check 正常报「实测=<异常文本>」：单条归因、不中断
+        整场、不丢剩余断言。
         """
         if self._deadline is None:  # 脚本外直接调用（罕见）：就地起一个预算
             self._deadline = time.monotonic() + self._timeout
-        result = window.evaluate_js(script)
+        result = self._evaluate(window, script)
         while result != expected and time.monotonic() < self._deadline:
             time.sleep(interval)
-            result = window.evaluate_js(script)
+            result = self._evaluate(window, script)
         return result
 
     def check_token_style(

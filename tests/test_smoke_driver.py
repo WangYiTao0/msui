@@ -19,9 +19,16 @@ import pytest
 from msui.testing import SmokeDriver
 
 
+class JavascriptException(Exception):
+    """与 pywebview 的 webview.errors.JavascriptException **同名**的本地替身。
+
+    wait_js 按异常类名字符串识别（msui.testing 不 import webview），所以
+    测试用同名本地类就能命中匹配分支，不用真装 pywebview。"""
+
+
 class FakeWindow:
     """假 window：evaluate_js 依次回放 replies（弹到只剩一个就重复它），
-    destroy 记录调用。"""
+    reply 是异常实例时改为抛出它；destroy 记录调用。"""
 
     def __init__(self, replies: tuple = ()) -> None:
         self.replies = list(replies)
@@ -32,9 +39,10 @@ class FakeWindow:
         self.evaluated.append(script)
         if not self.replies:
             return None
-        if len(self.replies) > 1:
-            return self.replies.pop(0)
-        return self.replies[0]
+        reply = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
 
     def destroy(self) -> None:
         self.destroyed = True
@@ -116,6 +124,70 @@ def test_wait_js_gives_up_at_deadline_and_returns_last_result():
 
     assert got == "永远不对"
     assert time.monotonic() - started < 2, "超时后必须放弃，不许一直轮询"
+    driver._watchdog.cancel()
+
+
+# ---------------------------------------------------------------------------
+# wait_js：JavascriptException 归因——异常文本当结果值返回，不中断整场
+# ---------------------------------------------------------------------------
+
+
+def test_wait_js_returns_javascript_exception_text_as_result():
+    """页面探针抛 JavascriptException 时不穿透：异常文本当结果值返回，
+    让调用方 check 正常报「实测=<异常文本>」。"""
+    driver = SmokeDriver(_noop_script, timeout=0.05)
+    boom = JavascriptException("TypeError: null is not an Element")
+    window = FakeWindow(replies=(boom,))
+
+    got = driver.wait_js(window, "getComputedStyle(missing)", "24px", interval=0.01)
+
+    assert "JavascriptException" in got, "结果值里要看得出这是异常，不是真实探针读数"
+    assert "null is not an Element" in got
+    driver._watchdog.cancel()
+
+
+def test_wait_js_keeps_polling_after_exception_until_expected():
+    """异常只是「这一拍没等到」：继续轮询，元素晚些出现照样能等到位。"""
+    driver = SmokeDriver(_noop_script, timeout=5)
+    boom = JavascriptException("null 探针")
+    window = FakeWindow(replies=(boom, boom, "就绪"))
+
+    got = driver.wait_js(window, "document.title", "就绪", interval=0.01)
+
+    assert got == "就绪"
+    assert len(window.evaluated) == 3
+    driver._watchdog.cancel()
+
+
+def test_wait_js_reraises_non_javascript_exceptions():
+    """只按类名放行 JavascriptException；别的异常（真 bug）照旧穿透，
+    由 __call__ 收进 failures 当「冒烟脚本异常」。"""
+    driver = SmokeDriver(_noop_script, timeout=0.05)
+    window = FakeWindow(replies=(RuntimeError("桥断了"),))
+
+    with pytest.raises(RuntimeError):
+        driver.wait_js(window, "document.title", "就绪", interval=0.01)
+    driver._watchdog.cancel()
+
+
+def test_script_continues_past_throwing_probe_and_keeps_remaining_checks():
+    """整场归因：抛异常的那条 check 正常记失败，剩余断言照跑不丢。"""
+    boom = JavascriptException("TypeError: probe blew up")
+
+    def _script(drive: SmokeDriver, window) -> None:
+        got = drive.wait_js(window, "getComputedStyle(missing)", "24px", interval=0.01)
+        drive.check(got == "24px", f"padding 实测 {got!r}")
+        drive.check(False, "后续断言也执行了")
+
+    driver = SmokeDriver(_script, timeout=0.05)
+    window = FakeWindow(replies=(boom,))
+
+    driver(window)
+
+    assert window.destroyed
+    assert len(driver.failures) == 2, "抛异常不许中断整场：两条失败都要在"
+    assert "probe blew up" in driver.failures[0]
+    assert driver.failures[1] == "后续断言也执行了"
     driver._watchdog.cancel()
 
 
