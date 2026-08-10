@@ -1,0 +1,34 @@
+[project]
+name = "msui"
+# 版本号**只写这里一处**（tests/test_version.py 盯着这个单一来源）。
+# 发布：git tag v<这个号> && git push origin v<这个号>，
+# CI 在装依赖之前核对 tag 与这里一致，不一致当场 fail（scripts/check_tag_version.py）。
+version = "0.1.0"
+description = "小程序共享 UI 运行时与样式（pywebview + WebView2）——骨架先行，功能后续迁入"
+readme = "README.md"
+# 与主仓 MSToolbox 对齐（那边因 tomllib 定了 3.11）；本包将来要被同一批小程序装，
+# 下限不该比主仓更松。
+requires-python = ">=3.11"
+# 本票只做骨架与发布链，不迁任何功能代码，所以零依赖。
+# pywebview 等运行时依赖等功能迁入的票再加。
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    # tests/test_wheel.py 用 python -m build --no-isolation 真构建一次 wheel，
+    # 所以 build 与 hatchling 都要装在 dev 环境里。
+    "build>=1.0",
+    "hatchling",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/msui"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "."]
+testpaths = ["tests"]
