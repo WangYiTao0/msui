@@ -9,9 +9,9 @@ readme = "README.md"
 # 与主仓 MSToolbox 对齐（那边因 tomllib 定了 3.11）；本包将来要被同一批小程序装，
 # 下限不该比主仓更松。
 requires-python = ">=3.11"
-# 本票只做骨架与发布链，不迁任何功能代码，所以零依赖。
-# pywebview 等运行时依赖等功能迁入的票再加。
-dependencies = []
+# shell.run 要开 pywebview 窗口（import 在 run() 函数体内，没装也能 import
+# 本包，但作为发行版依赖必须声明——装了 msui 就该装得上开窗的底座）。
+dependencies = ["pywebview"]
 
 [project.optional-dependencies]
 dev = [
