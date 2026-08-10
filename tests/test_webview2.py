@@ -12,6 +12,9 @@ seam：`is_webview2_installed` 的 `read_registry`、`ensure_webview2` 的
   - User-Agent（会随下载请求发到微软服务器）；
   - 临时目录前缀；
   - 模块 docstring 第一行。
+
+守卫写法约定：全部用 allowlist/结构断言（fullmatch 白名单、前缀断言、票号
+正则），**不许把被禁字样本身写进断言字面量**——否则守卫测试自己就成了泄漏源。
 """
 from __future__ import annotations
 
@@ -261,13 +264,16 @@ def test_all_three_failure_messages_are_human_not_raw_exceptions(make_result):
 # ---------------------------------------------------------------------------
 
 
-def test_user_agent_has_no_brand_or_ticket_or_personal_account():
+def test_user_agent_is_neutral_msui_form():
+    """UA 会随下载请求发到微软服务器，必须是中性的 msui/<版本> 形态。
+
+    用 allowlist（fullmatch 白名单）而非列举被禁词：任何品牌名、账号名、
+    空格、括号都进不了这个字符集，且守卫自身不携带被禁字样。
+    """
     from msui import webview2
 
     ua = webview2._USER_AGENT
-    assert "milwaukee" not in ua.lower()
-    assert "mstoolbox" not in ua.lower()
-    assert "wangyitao" not in ua.lower()
+    assert re.fullmatch(r"msui-[A-Za-z0-9./-]+", ua)
     assert "github.com" not in ua.lower()
     assert not re.search(r"#\d+", ua)
 
@@ -297,17 +303,23 @@ def test_temp_dir_prefix_has_no_brand():
 
     assert tmp_prefix_calls
     for prefix in tmp_prefix_calls:
-        assert "mstoolbox" not in prefix.lower()
-        assert "milwaukee" not in prefix.lower()
+        # allowlist：前缀必须是 msui- 开头的纯 [msui-字母数字.-] 形态，
+        # 品牌名/账号名根本进不来，无须列举被禁词。
+        assert prefix.startswith("msui-")
+        assert re.fullmatch(r"msui-[A-Za-z0-9.-]*", prefix)
 
 
-def test_module_docstring_has_no_brand_or_ticket_numbers():
+def test_module_docstring_has_no_ticket_or_internal_references():
+    """结构断言拦内部痕迹：#号票引、spec+井号、P+两位数内部代号、账号域名。
+
+    不把品牌词本身写进断言字面量——用形态特征（票号/代号的书写模式）覆盖
+    内部引用，配合非空断言确保 docstring 存在。
+    """
     import msui.webview2 as webview2_module
 
     doc = webview2_module.__doc__ or ""
-    assert "milwaukee" not in doc.lower()
-    assert "mstoolbox" not in doc.lower()
-    assert not re.search(r"#\d+", doc)  # 内部票号形如 #79 / #73
-    assert "spec #" not in doc.lower()
-    assert "P32" not in doc
-    assert "wangyitao" not in doc.lower()
+    assert doc.strip()  # docstring 必须存在，否则下面全是空转
+    assert not re.search(r"#\d+", doc)  # 内部票号形如 #NN
+    assert not re.search(r"spec\s*#", doc, re.IGNORECASE)
+    assert not re.search(r"\bP\d{2}\b", doc)  # 内部阶段代号形如 P + 两位数
+    assert "github.com" not in doc.lower()  # 个人账号以仓库 URL 形态出现
