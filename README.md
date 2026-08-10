@@ -15,7 +15,7 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 两处版本号**：
 
 ```
-msui @ https://github.com/WangYiTao0/msui/releases/download/v0.4.0/msui-0.4.0-py3-none-any.whl
+msui @ https://github.com/WangYiTao0/msui/releases/download/v0.4.1/msui-0.4.1-py3-none-any.whl
 ```
 
 另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
@@ -57,7 +57,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.4.0"
+MSUI_PINNED = "0.4.1"
 
 
 class Api:
@@ -444,7 +444,7 @@ base.css
 ```text
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
-   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.4.0/msui-0.4.0-py3-none-any.whl
+   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.4.1/msui-0.4.1-py3-none-any.whl
    另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
    要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
