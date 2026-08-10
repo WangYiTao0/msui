@@ -4,8 +4,8 @@
 1. README 里每个以 `# examples/...` 或 `<!-- examples/... -->` 标记行开头的
    代码块，标记行之后的内容 == 那个文件的全文——README 里的代码就是从
    examples 抄的，两边一旦漂移当场红；
-2. 覆盖清单钉死：app.py / index.html / test_style_gate.py / app.spec 四份
-   都必须被 README 引用（少引一份 = 契约不完整）；
+2. 覆盖清单钉死：app.py / index.html / skeleton.html / test_style_gate.py /
+   app.spec 五份都必须被 README 引用（少引一份 = 契约不完整）；
 3. 安装行与「给 AI 的转述块」里的 wheel URL 版本号 == pyproject.toml 的
    version——发新版忘了改 README 当场红，也不许残留旧版本的下载 URL。
 """
@@ -28,6 +28,7 @@ _BLOCK_RE = re.compile(
 EXPECTED_QUOTED_FILES = {
     "examples/minimal/app.py",
     "examples/minimal/pages/index.html",
+    "examples/minimal/pages/skeleton.html",
     "examples/minimal/tests/test_style_gate.py",
     "examples/minimal/app.spec",
 }

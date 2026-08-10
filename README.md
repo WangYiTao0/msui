@@ -15,7 +15,7 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 两处版本号**：
 
 ```
-msui @ https://github.com/WangYiTao0/msui/releases/download/v0.3.0/msui-0.3.0-py3-none-any.whl
+msui @ https://github.com/WangYiTao0/msui/releases/download/v0.4.0/msui-0.4.0-py3-none-any.whl
 ```
 
 另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
@@ -79,7 +79,7 @@ def page_dir() -> Path:
 
 
 def smoke_script(drive: SmokeDriver, window) -> None:
-    """冒烟脚本（跑在 pywebview 后台线程）：桥往返 + 样式生效各一条断言。
+    """冒烟脚本（跑在 pywebview 后台线程）：桥往返、样式生效、版式地基。
 
     失败收集、finally 销毁窗口、超时兜底都由 SmokeDriver 骨架代办。
     """
@@ -90,6 +90,16 @@ def smoke_script(drive: SmokeDriver, window) -> None:
     drive.check(got == "pong 来自 Python", f"桥往返回显不对：{got!r}")
     # 样式吃进去了：主按钮实测背景色 == --brand token 解出的 rgb
     drive.check_token_style(window, "button.primary", "backgroundColor", "brand")
+    # 版式地基生效：内容不贴窗框（body 非零内边距）、大读数居中吃 48px 档
+    pad = drive.wait_js(window, "getComputedStyle(document.body).paddingLeft", "24px")
+    drive.check(pad == "24px", f"body 左内边距该是 24px（--space-5），实测 {pad!r}")
+    readout = drive.wait_js(
+        window,
+        "(() => { const d = getComputedStyle(document.querySelector('.display'));"
+        " return d.textAlign + ' ' + d.fontSize; })()",
+        "center 48px",
+    )
+    drive.check(readout == "center 48px", f".display 该居中吃 48px 档，实测 {readout!r}")
 
 
 def main() -> None:
@@ -137,8 +147,42 @@ if __name__ == "__main__":
 
 ## 3. 页面写语义 HTML
 
+新页面不从空白起步——先抄这份**标准单列页骨架**。容器约定：**body 就是
+容器**（边距、内容列宽 `--content-max`、垂直节奏全由 base.css 落在 body 上，
+不存在也不需要 `.page` 之类的容器类；裸语义 HTML 零 class 就有边距与节奏）：
+
+```html
+<!-- examples/minimal/pages/skeleton.html -->
+<!DOCTYPE html>
+<!--
+  标准单列页骨架：新页面从这几行起步，不写一行版式 CSS。
+  容器约定：**body 就是容器**——边距、内容列宽（--content-max）、垂直节奏
+  全由 base.css 落在 body 上；不存在也不需要 .page 之类的容器类，裸语义
+  HTML 零 class 就有边距与节奏。.display 挂在主角读数上（增强，不是必需），
+  没有主角读数的页面删掉那一行即可。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>应用名</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+</head>
+<body>
+  <h1>应用名</h1>
+  <p>一句话说明这个小工具是干什么的。</p>
+  <output class="display">0</output>
+  <div class="card">
+    <button class="primary">主操作</button>
+    <button>次要操作</button>
+  </div>
+</body>
+</html>
+```
+
 写裸 `button` / `input` / `table` / `a` / `h1` 就得到统一长相；任何颜色只经
-`var(--token)` 取用，**不许手写十六进制色值**（第 5 步的闸门盯着）：
+`var(--token)` 取用，**不许手写十六进制色值**（第 5 步的闸门盯着）。完整
+示例（骨架长开之后的样子，带桥调用）：
 
 ```html
 <!-- examples/minimal/pages/index.html -->
@@ -160,7 +204,9 @@ if __name__ == "__main__":
 </head>
 <body>
   <h1>示例小程序</h1>
-  <p>下面全是裸标签：没有写任何一行自定义样式，长相来自共享的 base.css。</p>
+  <p>下面全是裸标签：没有写任何一行自定义样式，长相与版式（边距、垂直节奏、
+    居中的大读数）全来自共享的 base.css。</p>
+  <output class="display">42</output>
   <div class="card">
     <h2>操作区</h2>
     <input placeholder="输入点什么">
@@ -200,8 +246,8 @@ if __name__ == "__main__":
 ```
 
 展示型大读数（计数器、倒计时这类页面的主角数字）给承载元素挂 `.display`
-类：字号走 tokens 的 `--font-display` 档（32px），数字等宽不晃动，照样零
-自定义样式。
+类：成块居中、字号走 tokens 的 `--font-display` 档（48px）、数字等宽不晃动、
+上下自带一档内衬，照样零自定义样式。
 
 ## 4. override.css（默认不用）
 
@@ -367,7 +413,7 @@ base.css
 ```text
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
-   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.3.0/msui-0.3.0-py3-none-any.whl
+   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.4.0/msui-0.4.0-py3-none-any.whl
    另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
    要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
@@ -394,8 +440,11 @@ base.css
     APP_SMOKE 分支）：失败收集与退出码判定、finally 销毁窗口、watchdog
     超时兜底都由它代办；样式生效断言用它的 check_token_style（token 解成
     rgb 与元素实测 computedStyle 比对）。
-11. 展示型大读数（计数器主角数字这类）给元素挂 .display 类，字号走
-    --font-display 档，不自己写字号。
+11. 展示型大读数（计数器主角数字这类）给元素挂 .display 类：成块居中、
+    字号走 --font-display 档（48px），不自己写字号、不自己居中。
+12. 版式零决策：body 就是容器——边距、内容列宽、垂直节奏由 base.css 落在
+    body 上，没有 .page 容器类；新页面从 msui README §3 的「标准单列页
+    骨架」可抄块起步，不写任何版式 CSS，间距要自取时用 --space-1…6 档。
 ```
 
 ## 发布（维护者）

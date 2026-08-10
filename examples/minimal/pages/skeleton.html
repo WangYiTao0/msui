@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<!--
+  标准单列页骨架：新页面从这几行起步，不写一行版式 CSS。
+  容器约定：**body 就是容器**——边距、内容列宽（--content-max）、垂直节奏
+  全由 base.css 落在 body 上；不存在也不需要 .page 之类的容器类，裸语义
+  HTML 零 class 就有边距与节奏。.display 挂在主角读数上（增强，不是必需），
+  没有主角读数的页面删掉那一行即可。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>应用名</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+</head>
+<body>
+  <h1>应用名</h1>
+  <p>一句话说明这个小工具是干什么的。</p>
+  <output class="display">0</output>
+  <div class="card">
+    <button class="primary">主操作</button>
+    <button>次要操作</button>
+  </div>
+</body>
+</html>

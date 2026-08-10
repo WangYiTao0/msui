@@ -9,7 +9,12 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* ---- 排版 ---- */
+/* ---- 排版与版式地基 ----
+   容器约定：**body 就是容器**（没有 .page 这种类，也不需要）——内边距、
+   内容列宽、块与块的节奏全部落在 body 与通用选择器上，裸语义 HTML 一行
+   class 不写就有边距与呼吸感。设计基准是 560×520 的小工具窗：两侧留
+   --space-5 后内容恰好 512 宽；窗口拉大时内容列居中停在 --content-max，
+   不摊开成一大片空黑。 */
 /* html 与 body 都显式染 --win：内嵌浏览器的过滚动/越界区域露出来的是 html
    的底，不染的话深色窗里会闪白边。 */
 html, body { height: 100%; background: var(--win); }
@@ -18,7 +23,22 @@ body {
   font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
+  max-width: var(--content-max);
+  margin-inline: auto;
+  /* 顶部比左右深一档：窗口标题栏下多留一口气，读起来不顶头。 */
+  padding: var(--space-6) var(--space-5) var(--space-5);
 }
+
+/* 垂直节奏：三档，全部走间距 token。
+   1. 顶层兄弟块之间常规档（h1、段落、卡片、表格彼此拉开）；
+   2. 标题后紧跟的说明段收紧成组（标题与它的说明是一件事，亲密性优先）；
+   3. 卡片内部再收一档（卡片里的行是同一件事的细节）。
+   选择器特异性刻意排好：body > * + *（0,0,1）< h1+p（0,0,2）
+   < .card > * + *（0,1,1），紧排规则天然压过常规档，不靠 !important。 */
+body > * + * { margin-top: var(--space-5); }
+h1 + p, h2 + p, h3 + p { margin-top: var(--space-2); }
+.card > * + * { margin-top: var(--space-3); }
+
 h1 { font-size: 18px; font-weight: 600; letter-spacing: .01em; }
 h2 { font-size: 15px; font-weight: 600; }
 h3 { font-size: 13px; font-weight: 600; }
@@ -92,7 +112,7 @@ tbody tr:hover { background: var(--card-hover); }
 /* ---- 卡片 ---- */
 .card {
   border: 1px solid var(--border); background: var(--card); border-radius: 10px;
-  padding: 14px 16px;
+  padding: var(--space-4);
   transition: transform 150ms ease-out, border-color 150ms ease-out,
               background 150ms ease-out;
 }
@@ -104,9 +124,12 @@ tbody tr:hover { background: var(--card-hover); }
 .card.clickable:active { transform: translateY(0); }
 
 /* ---- 展示型大读数：计数、倒计时这类页面主角数字挂 .display ----
-   tabular-nums 让数字等宽，读数跳动时不左右晃。 */
+   页面唯一的主角：转 block 居中（挂在 output 这类 inline 元素上也成立），
+   上下加一档内衬撑出空气；tabular-nums 让数字等宽，读数跳动时不左右晃。 */
 .display {
-  font-size: var(--font-display); font-weight: 600;
+  display: block; text-align: center;
+  padding-block: var(--space-3);
+  font-size: var(--font-display); font-weight: 600; line-height: 1.1;
   letter-spacing: .02em; font-variant-numeric: tabular-nums;
 }
 

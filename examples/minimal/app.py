@@ -43,7 +43,7 @@ def page_dir() -> Path:
 
 
 def smoke_script(drive: SmokeDriver, window) -> None:
-    """冒烟脚本（跑在 pywebview 后台线程）：桥往返 + 样式生效各一条断言。
+    """冒烟脚本（跑在 pywebview 后台线程）：桥往返、样式生效、版式地基。
 
     失败收集、finally 销毁窗口、超时兜底都由 SmokeDriver 骨架代办。
     """
@@ -54,6 +54,16 @@ def smoke_script(drive: SmokeDriver, window) -> None:
     drive.check(got == "pong 来自 Python", f"桥往返回显不对：{got!r}")
     # 样式吃进去了：主按钮实测背景色 == --brand token 解出的 rgb
     drive.check_token_style(window, "button.primary", "backgroundColor", "brand")
+    # 版式地基生效：内容不贴窗框（body 非零内边距）、大读数居中吃 48px 档
+    pad = drive.wait_js(window, "getComputedStyle(document.body).paddingLeft", "24px")
+    drive.check(pad == "24px", f"body 左内边距该是 24px（--space-5），实测 {pad!r}")
+    readout = drive.wait_js(
+        window,
+        "(() => { const d = getComputedStyle(document.querySelector('.display'));"
+        " return d.textAlign + ' ' + d.fontSize; })()",
+        "center 48px",
+    )
+    drive.check(readout == "center 48px", f".display 该居中吃 48px 档，实测 {readout!r}")
 
 
 def main() -> None:

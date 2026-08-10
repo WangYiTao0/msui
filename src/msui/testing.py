@@ -152,6 +152,13 @@ HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 NON_HEX_TOKENS = frozenset(
     {
         "font-display",  # 展示型大读数的字号档——量值，不是颜色
+        "space-1",  # 间距体系：4px 基线的六档——量值，不是颜色
+        "space-2",
+        "space-3",
+        "space-4",
+        "space-5",
+        "space-6",
+        "content-max",  # 内容列宽（body 即容器的 max-width）——量值，不是颜色
         "error-bg",  # error 系半透明底
         "error-strip-border",  # error 系半透明边框
         "error-wash",  # error 系 hover 提亮罩
