@@ -18,6 +18,13 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 msui @ https://github.com/WangYiTao0/msui/releases/download/v0.2.0/msui-0.2.0-py3-none-any.whl
 ```
 
+开发环境另装两个工具（跑闸门测试要 pytest，打包要 pyinstaller；它们不进
+requirements，不随产物分发）：
+
+```
+pip install pytest pyinstaller
+```
+
 ## 2. 最小启动
 
 页面（HTML/CSS/JS）放自己仓的 `pages/` 目录；启动三步——定位页面目录、
@@ -214,11 +221,28 @@ coll = COLLECT(
 )
 ```
 
-打包与冒烟（不上屏）：
+打包与冒烟（不上屏）。打包命令两平台一样，冒烟按平台各一行：
 
 ```
 pyinstaller examples/minimal/app.spec --noconfirm --distpath dist --workpath build
+```
+
+```powershell
+# Windows（PowerShell）——正式目标平台
+$env:APP_SMOKE = "1"; .\dist\app\app.exe
+```
+
+```sh
+# macOS / Linux——开发机预演用
 APP_SMOKE=1 ./dist/app/app
+```
+
+msui 落进来的两份样式副本要挡在 git 外——`pages/.gitignore` 写这两行
+（仓里的唯一样式来源是 msui 包，副本入了仓就是漂移源）：
+
+```
+tokens.css
+base.css
 ```
 
 ## 版本标记：产物里读得出带的是哪版 msui
