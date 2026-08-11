@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from msui import testing as msui_testing
 from msui.resources import (
     BASE_CSS_NAME,
     TOKENS_CSS_NAME,
@@ -25,6 +26,7 @@ from msui.resources import (
 from msui.testing import (
     ALLOWED_HEX_FILE_NAMES,
     BASE_TOKEN_PAIRS,
+    CONTROL_MINIMUM,
     DISABLED_MINIMUM,
     HEX_COLOR_RE,
     NON_HEX_TOKENS,
@@ -145,6 +147,60 @@ def test_display_font_token_registered_and_base_css_consumes_it(
     assert "var(--font-display)" in base, ".display 的字号必须走 --font-display 档"
 
 
+def test_field_label_token_registered_and_base_css_consumes_it(
+    all_tokens: dict[str, str],
+):
+    """表单行的标签列宽 --field-label：三处齐活，与 --font-display 同一口径。
+
+    tokens.css 里有它、值是 px 量值（不是色值，所以必须登记进 NON_HEX_TOKENS，
+    否则 hex_tokens 当场炸）、base.css 的 .field 真的消费它——三处少一处，
+    「多行表单的输入框左边缘对齐」就没有唯一来源了。
+    """
+    assert all_tokens.get("field-label", "").endswith("px"), (
+        "tokens.css 里缺 --field-label 标签列宽"
+    )
+    assert "field-label" in NON_HEX_TOKENS, (
+        "--field-label 不是色值，必须登记进 NON_HEX_TOKENS 白名单"
+    )
+    base = base_css_path().read_text(encoding="utf-8")
+    assert ".field" in base, "base.css 里没有承载表单行的 .field 类"
+    assert "var(--field-label)" in base, "标签列宽必须走 --field-label 档"
+
+
+def test_font_mono_token_registered_and_base_css_consumes_it(
+    all_tokens: dict[str, str],
+):
+    """日志区的等宽字体族 --font-mono：三处齐活，与 --font-display 同一口径。
+
+    tokens.css 里有它、值是一串字体族（不是色值，所以必须登记进 NON_HEX_TOKENS，
+    否则 hex_tokens 当场炸）、base.css 的 .log 真的消费它——三处少一处，日志区
+    就会退回正文那套比例字体，路径与时间戳对不齐。
+    """
+    value = all_tokens.get("font-mono", "")
+    assert "," in value, "tokens.css 里缺 --font-mono 等宽字体族"
+    assert value.rstrip().endswith("monospace"), (
+        "字体族的最后一档必须是通用的 monospace：前面那些具体字体名在哪个平台"
+        "缺席都可能，兜底那一档不能少"
+    )
+    assert "font-mono" in NON_HEX_TOKENS, (
+        "--font-mono 不是色值，必须登记进 NON_HEX_TOKENS 白名单"
+    )
+    base = base_css_path().read_text(encoding="utf-8")
+    assert ".log" in base, "base.css 里没有承载日志区的 .log 类"
+    assert "var(--font-mono)" in base, "日志区的字体必须走 --font-mono 档"
+
+
+def test_scrim_token_registered_and_base_css_consumes_it(all_tokens: dict[str, str]):
+    """模态遮罩 --scrim：半透明晕染（所以进白名单、不参与对比度断言），
+    消费者是 base.css 的 dialog::backdrop。"""
+    assert all_tokens.get("scrim", "").startswith("rgba("), (
+        "遮罩必须是半透明的——不透光的话底层整个消失，用户失去上下文"
+    )
+    assert "scrim" in NON_HEX_TOKENS
+    base = base_css_path().read_text(encoding="utf-8")
+    assert "dialog::backdrop" in base and "var(--scrim)" in base
+
+
 def test_hex_tokens_raises_on_unregistered_non_hex_value():
     """方向二：没登记的非 hex 值当场报错，不被闸门悄悄放过。"""
     with pytest.raises(ValueError, match="rogue"):
@@ -218,6 +274,92 @@ def test_muted_pairs_are_held_to_three_not_the_text_minimum():
     muted_pairs = [p for p in BASE_TOKEN_PAIRS if p.foreground == "muted"]
     assert muted_pairs
     assert all(p.minimum == DISABLED_MINIMUM for p in muted_pairs)
+
+
+def test_progress_fill_is_registered_against_the_colour_it_actually_touches():
+    """进度条填充：档位 3.0（图形控件），底是**真正相邻**的轨道。
+
+    填充画在轨道上、边挨边，所以是 brand vs track；轨道下面的 card / win 与
+    填充中间隔着轨道，不是进度条这条相邻关系的底。本条只盯进度条那一条 ——
+    brand 还有主按钮那两条（vs card / vs win），那是另一处真实相邻关系，由
+    下面 test_primary_button_edges_are_registered_against_both_surfaces 管。
+    """
+    fill_pairs = [p for p in BASE_TOKEN_PAIRS if p.what.startswith("进度条填充")]
+    assert fill_pairs, "缺少进度条填充的登记项"
+    assert all(p.foreground == "brand" for p in fill_pairs)
+    assert all(p.minimum == CONTROL_MINIMUM for p in fill_pairs)
+    assert {p.background for p in fill_pairs} == {"track"}, (
+        "填充紧挨着的是轨道 --track，不是它下面的 card / win"
+    )
+
+
+def test_primary_button_edges_are_registered_against_both_surfaces():
+    """主按钮的形状边界：`--brand` 同时是填充与描边，四周就是卡片底或窗底。
+
+    base.css 里 `button.primary { background: var(--brand); border-color:
+    var(--brand) }` —— 这两对颜色在页面上天天边挨边，WCAG 1.4.11 要的
+    「非文字内容的形状分得出来」就卡在它们身上，档位 3.0。
+
+    这条测试是回归闸门：前一版这两条的**标签**写错成「进度条填充」，修的人
+    把标签当成内容、连颜色组合一起删了，只留下 brand vs track。而 track
+    (#0b0b0d) 比 card(#1a1a1f) 更暗，brand vs card 永远比 brand vs track 更
+    紧 —— 删掉的正是卡关的那两条，留下的是松的那条。
+    """
+    backgrounds = {
+        p.background
+        for p in BASE_TOKEN_PAIRS
+        if p.foreground == "brand" and p.minimum == CONTROL_MINIMUM
+    }
+    assert {"card", "win"} <= backgrounds, (
+        "主按钮的填充与描边都是 --brand，四周是 card 或 win —— 两条都要登记"
+    )
+
+
+def test_primary_button_edges_would_fail_a_darker_brand():
+    """自证：这两条不是摆设。把 --brand 换成更暗的红，闸门必须点名主按钮。
+
+    #c00219 下 brand vs card 2.69、brand vs win 2.86，双双掉到 3.0 以下，而
+    brand vs track 还有 3.06 —— 只登记 track 的那一版会报「全绿」。
+    """
+    colors = hex_tokens(parse_tokens(tokens_css_path().read_text(encoding="utf-8")))
+    failures = contrast_failures({**colors, "brand": "#c00219"}, BASE_TOKEN_PAIRS)
+    failed = {(p.foreground, p.background) for p in failures}
+    assert ("brand", "card") in failed and ("brand", "win") in failed, (
+        "更暗的 brand 下主按钮两条边界都该红；报文：\n"
+        + format_contrast_failures(failures, {**colors, "brand": "#c00219"})
+    )
+
+
+def test_track_is_a_solid_colour_that_the_gate_can_actually_check(
+    all_tokens: dict[str, str], colors: dict[str, str]
+):
+    """凹陷式轨道：--track 是实色、不在白名单里，两条相邻关系各自达标。
+
+    三件事一起立才算数——轨道是 hex（半透明的话 contrast_ratio 根本算不了，
+    只能靠白名单绕过去）、它没被登记进 NON_HEX_TOKENS（登记了就等于退出闸门）、
+    以及两条真实相邻关系：填充对轨道过控件档，描边对轨道过分隔线档（「轨道
+    边界看得见」这件事由描边承担，轨道自己对卡片只有 1.13:1、够不到 1.3）。
+    """
+    assert HEX_COLOR_RE.match(all_tokens.get("track", "")), (
+        "--track 是凹陷式实色轨道，必须是 #rrggbb —— 改回半透明就等于退出闸门"
+    )
+    assert "track" not in NON_HEX_TOKENS, "--track 是实色，不许再挂在非 hex 白名单上"
+    assert contrast_ratio(colors["brand"], colors["track"]) >= CONTROL_MINIMUM
+    assert contrast_ratio(colors["border"], colors["track"]) >= SEPARATOR_MINIMUM
+    assert contrast_ratio(colors["track"], colors["card"]) < SEPARATOR_MINIMUM, (
+        "轨道自己要是也过了分隔线档，描边那条登记就该重新讨论——本条盯着"
+        "「为什么需要描边」这个前提别在无人察觉时失效"
+    )
+
+
+def test_control_threshold_is_exported_as_its_own_knob():
+    """控件档与弱化文字档数值相同、含义不同，所以是两个常量、都在公开面上。
+
+    合成一个的话，日后调「弱化文字还看得见」的下限会顺手改掉「图形控件的
+    形状分得出来」，反之亦然。
+    """
+    assert CONTROL_MINIMUM == 3.0
+    assert "CONTROL_MINIMUM" in msui_testing.__all__
 
 
 def test_error_and_brand_each_have_their_own_registered_combo():

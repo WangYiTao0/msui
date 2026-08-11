@@ -6,3 +6,6 @@ build/
 *.egg-info/
 .pytest_cache/
 .sediment/
+# uv 的解析锁文件。这个仓是**库**、从来没纳管过它：装它的人各自解析依赖，
+# 锁在这里既不会被消费者用到，又会在每次 uv run 后跳出来当未跟踪文件。
+uv.lock

@@ -2,7 +2,8 @@
  * 通用组件的默认长相（深色）。搭配 tokens.css 使用：色彩一律 `var(--xxx)`
  * 引用，本文件不许出现字面色值（十六进制 / rgb() / hsl()），有测试盯着。
  *
- * 覆盖：排版、按钮、输入框、表格、卡片、空态。两条原则：
+ * 覆盖：排版、按钮、操作行、输入框、表单行、进度条、表格、卡片、模态对话框、
+ * 提示条、日志区、空态。两条原则：
  *   1. 语义化标签（button / input / table…）直接给默认样式，裸 HTML 就长对；
  *   2. 类名中性（.btn / .card / .input / .empty），不含任何业务语义。
  */
@@ -50,8 +51,11 @@ a:hover { text-decoration: underline; }
 hr { border: 0; border-top: 1px solid var(--border); }
 
 /* 滚动条：不限定在某个容器上，任何滚动区都同一套；track/corner 染 --win
-   与窗口底融为一体，thumb 沿用分隔线的 hover 色。 */
-::-webkit-scrollbar { width: 10px; }
+   与窗口底融为一体，thumb 沿用分隔线的 hover 色。
+   width 管竖条、height 管横条，**两个都要写**：只写 width 的话，.log 那种
+   横向滚动区的横滚条会退回引擎默认粗细（本机 WebKit 实测 17px），跟竖条的
+   10px 一粗一细摆在同一个框里，一眼就看得出是漏了一半。 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: var(--win); }
 ::-webkit-scrollbar-corner { background: var(--win); }
 ::-webkit-scrollbar-thumb { background: var(--border-hover); border-radius: 999px; }
@@ -104,6 +108,90 @@ input:focus, textarea:focus, select:focus, .input:focus-within {
 }
 input::placeholder, textarea::placeholder { color: var(--muted); }
 
+/* ---- 表单行：标签 + 弹性输入框 + 尾部按钮，一行排开 ----
+   `<div class="field"><label>…</label><input><button>…</button></div>`
+   标签定宽（--field-label）→ 多行竖排时输入框的左边缘各自对齐；输入框
+   flex 吃掉剩余宽度（窗口拉大时跟着变宽，长路径不被截断）；尾部按钮
+   flex: 0 0 auto 不被压扁。
+
+   两个数各有分工，别混：
+   - `min-width: 0` 是**防横向溢出**——输入框的 min-width:auto 默认不肯缩到
+     内容尺寸以下，不归零的话窄窗里整行会顶破容器；
+   - `flex-basis: 12ch` 是**折行阈值**——flex 折行看的是压缩前的基准尺寸，
+     归零 min-width 之后还得留一个基准，否则输入框只会一路缩到看不见、
+     永远不折行。两者一起才有「窄窗折行、不横向溢出」。
+
+   输入框与尾部按钮 align-self: stretch：行高由最高的那个（输入框）定，
+   按钮撑到同高 → 两者顶边严丝合缝地齐平（冒烟实测这一条）。标签保持
+   居中，不跟着拉长。
+
+   最后那条归零与 `.actions > * + *` 是同一个先例，理由一字不差：
+   `.card > * + *`（0,1,1）与 `.field > * + *`（0,1,1）特异性相同，靠**写在
+   它后面**取胜——不压掉的话 `<div class="card field">` 这种整卡即一行的
+   写法里，输入框起会带 margin-top，在 flex 行里表现为控件高低不齐。
+   所以这条规则的位置同样不能上移到垂直节奏那一节去。 */
+.field {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+.field > label { flex: 0 0 var(--field-label); color: var(--text-dim); }
+.field > input, .field > select, .field > textarea, .field > .input {
+  flex: 1 1 12ch; min-width: 0; align-self: stretch;
+}
+.field > button, .field > .btn { flex: 0 0 auto; align-self: stretch; }
+.field > * + * { margin-top: 0; }
+
+/* ---- 进度条：裸 <progress> 就有长相 ----
+   轨道 --track、进度 --brand、圆角与按钮同一档（7px）、默认占满内容列宽。
+
+   轨道是**凹陷式**的：--track 比卡片更暗（不是罩在卡片上的提亮罩），这样紧
+   挨着它的 --brand 填充才过得了控件档 3.0——实测 3.78:1；轨道做成提亮罩时
+   这一对只有 2.56:1，「填到哪儿了」与「空槽」分不出来。代价是轨道自己陷进
+   底色里、边界看不见（对卡片只有 1.13:1），所以另加一圈 1px --border 描边把
+   「这里有一条槽」画出来：border 对轨道 1.50、对卡片 1.32，两边都过分隔线档
+   1.3。两个数的来龙去脉写在 tokens.css 的 --track 那条注释里，改色前先看那。
+   描边不额外占高：文件顶上 `* { box-sizing: border-box }`，下面的 height 是
+   含描边的总高。
+
+   跨引擎的关键一步是 `appearance: none`：WebKit 与 Chromium 都把
+   <progress> 画成原生控件，不摘掉的话 ::-webkit-progress-bar /
+   ::-webkit-progress-value 两条规则在两边都不起作用，深色窗里露出系统
+   默认的浅色控件。摘掉之后两个引擎走的是同一对伪元素，长相一致。
+   （元素自身的 background 是给不认这对伪元素的引擎兜底的轨道底。）
+
+   两种态都要：
+   - determinate：写了 value，::-webkit-progress-value 按比例填充；
+   - 不定态：**不给 value**（`progress_percent()` 算不出百分比时回 None，
+     页面就该退化成这一种）——轨道上跑一段来回移动的品牌色，宽度不表示
+     任何进度。值伪元素在这一态下不参与画（背景摘掉），免得某些引擎按
+     0 或满宽画出一条误导性的填充。 */
+progress {
+  appearance: none; -webkit-appearance: none;
+  display: block; width: 100%; height: 8px;
+  border: 1px solid var(--border); border-radius: 7px; overflow: hidden;
+  background: var(--track);
+}
+progress::-webkit-progress-bar { background: var(--track); }
+progress::-webkit-progress-value { background: var(--brand); border-radius: 7px; }
+
+progress:not([value]) {
+  background-image: linear-gradient(90deg, var(--track), var(--brand), var(--track));
+  background-size: 40% 100%; background-repeat: no-repeat;
+  animation: msui-progress-loop 1.1s ease-in-out infinite;
+}
+/* 与上面那条内容相同、故意分开写：把伪元素选择器并进同一个选择器列表的话，
+   哪个引擎不认 ::-webkit-progress-bar，整条规则（含宿主那半边）就一起被丢掉。 */
+progress:not([value])::-webkit-progress-bar {
+  background-image: linear-gradient(90deg, var(--track), var(--brand), var(--track));
+  background-size: 40% 100%; background-repeat: no-repeat;
+  animation: msui-progress-loop 1.1s ease-in-out infinite;
+}
+progress:not([value])::-webkit-progress-value { background: none; }
+@keyframes msui-progress-loop {
+  from { background-position: -50% 0; }
+  to { background-position: 150% 0; }
+}
+
 /* ---- 表格 ---- */
 table {
   width: 100%; border-collapse: collapse;
@@ -135,6 +223,108 @@ tbody tr:hover { background: var(--card-hover); }
 }
 .card.clickable:active { transform: translateY(0); }
 
+/* ---- 模态确认对话框：裸 <dialog> + showModal() 就有长相 ----
+   破坏性动作（覆盖、搬迁、删除）的确认走这一样，**不许用 JS 的 confirm()**：
+   confirm 会阻塞 webview 的消息循环——弹着的那段时间里桥调用、进度回推、
+   窗口重绘全停摆，某些 WebView2 版本上还会连着窗口一起僵住。<dialog> 是
+   页面自己的元素，模态是 top layer 干的活，主循环照跑。
+
+   长相就是一张浮起来的卡片：底/边框/圆角/内衬与 .card 同一套（同一档圆角
+   有测试从 .card 那条规则里取档位比对），宽度上限跟着 --content-max 走 ——
+   与正文列同宽，多行说明的行长读起来跟页面里的段落一个手感。
+
+   三处容易踩的坑，都在下面这条规则里：
+   - `margin: auto` 是**必须显式还回来的**：居中靠的就是 UA 那条 margin
+     auto（模态态 position:fixed + inset:0，四边 auto 即上下左右居中），而
+     本文件顶上的 `* { margin: 0 }` 把它连根清掉了。不还的话对话框会贴在
+     窗口左上角；
+   - **这条规则里一个 display 都不许写**：「关着就不见」的唯一来源是 UA 的
+     `dialog:not([open]) { display: none }`，作者样式里的任何 display 声明
+     都会盖过它（作者层压 UA 层，跟特异性无关），结果是没 open 的对话框
+     直接摊在页面里；
+   - 说明文字多到几行放不下时自己滚（max-height + overflow），不把按钮行
+     顶到窗外去。滚动条沿用上面那套。 */
+dialog {
+  margin: auto;
+  width: calc(100% - var(--space-6));
+  max-width: var(--content-max);
+  max-height: calc(100% - var(--space-6));
+  overflow: auto;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: var(--space-4);
+}
+dialog::backdrop { background: var(--scrim); }
+/* 对话框内部的竖向节奏与卡片同一档（标题、说明段、按钮行之间）。按钮行直接
+   挂 .actions，不另造一套：`.actions > * + *` 带一个类选择器，这条只有类型
+   选择器，前者特异性更高、直接压过来，横排该有的样子自动生效——这跟 .card
+   那对同分选择器不一样，不靠源码顺序。 */
+dialog > * + * { margin-top: var(--space-3); }
+
+/* ---- 内联提示条：一个中性 .notice + 四个状态修饰 ----
+   `<p class="notice error">校验没过：两个目录不能重叠……</p>`
+   状态色的半透明晕染底（--error-bg / --warn-bg / --info-bg / --ok-bg）配同名
+   实色文字；四行长文案读得下去（line-height 与段落同档，行长受 body 的内容
+   列宽约束）。行内可以直接跟一个 <button>（按钮默认 inline-block，跟着文字
+   流走）—— 错误态那个「重试」按钮的边框与 hover 罩就是 --error-strip-border
+   / --error-wash 这两个 token 的用处。
+
+   **这条规则里一个 display 都不许写**（同 dialog 那条的第二个坑）：显示/隐藏
+   的开关就是 `hidden` 属性（`el.hidden = true/false`，校验失败时显示、成功时
+   收起），而 `[hidden] { display: none }` 是 UA 层的规则，作者层随便写个
+   `display: flex` 都会把它盖掉 —— 藏起来的提示条会照样显示在页面上。要横排
+   的话给里面的元素挂 .actions，别动 .notice 自己的 display。
+
+   只有 error 一档的边框跟着染色：状态里只有「出错了」需要喊一声，tokens 也
+   只为它备了 -strip-border。剩下三档沿用中性 --border，不为它们凭空造三个
+   新 token。 */
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--wash); color: var(--text-dim);
+  line-height: 1.6;
+}
+.notice.error {
+  background: var(--error-bg); border-color: var(--error-strip-border);
+  color: var(--error);
+}
+.notice.warn { background: var(--warn-bg); color: var(--warn); }
+.notice.info { background: var(--info-bg); color: var(--info); }
+.notice.ok { background: var(--ok-bg); color: var(--ok); }
+/* 错误条里的行内按钮（典型是「重试」）：跟着条子一起染，不然一个灰按钮贴在
+   红条子上像是别的东西掉进来了。特异性 (0,2,1) 压过通用按钮的 hover。 */
+.notice.error button, .notice.error .btn {
+  border-color: var(--error-strip-border); color: var(--error);
+}
+.notice.error button:hover, .notice.error .btn:hover {
+  background: var(--error-wash); color: var(--error);
+}
+
+/* ---- 定高滚动日志区：<pre class="log"> ----
+   等宽字体走 --font-mono 档；自己滚（overflow: auto）、最高 40vh，不把整页
+   撑长。挂在 <pre> 上最省事（语义也对），挂在 <div> 上一样成立 —— 不换行与
+   等宽这两件事这条规则自己都写了，不靠 <pre> 的默认值。
+
+   `white-space: pre` 是刻意的、不许改成 pre-wrap：消费者的日志每行都是长
+   文件路径（`//fileserver/share/归档/2024/…/sample-0001_20240131.dat` 这种），
+   折行之后一条路径
+   断成两三截，眼睛没法顺着扫。长行**横向滚动**，横滚条由上面那套统一的
+   ::-webkit-scrollbar 画（横条的粗细归那条规则的 height 管，见那里的注释）。
+
+   要它占满剩余高度的页面覆写 max-height（或改 height）即可，别在这里写死一
+   个「刚好合某一扇窗」的数。 */
+.log {
+  font-family: var(--font-mono);
+  font-size: 12px; line-height: 1.55;
+  max-height: 40vh; overflow: auto;
+  white-space: pre;
+  padding: var(--space-3);
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--win); color: var(--text-dim);
+}
+
 /* ---- 展示型大读数：计数、倒计时这类页面主角数字挂 .display ----
    页面唯一的主角：转 block 居中（挂在 output 这类 inline 元素上也成立），
    上下加一档内衬撑出空气；tabular-nums 让数字等宽，读数跳动时不左右晃。 */
@@ -156,4 +346,14 @@ tbody tr:hover { background: var(--card-hover); }
 /* ---- 动效可关：系统偏好「减少动态效果」时全体静止 ---- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+  /* 通配符 `*` 匹配的是**元素**，匹配不到 ::-webkit-progress-bar /
+     ::-webkit-progress-value 这两个引擎内部的伪元素——而不定态进度条那圈动画
+     恰恰画在 bar 上（宿主元素的 background 只是给不认伪元素的引擎兜底的，
+     Blink/WebKit 上用户看到的是 bar 这一层）。逐像素对照实测过：开着
+     --force-prefers-reduced-motion 时同一页里的 <div> 已经停住，
+     ::-webkit-progress-bar 还在跑。所以这两个伪元素必须单独点名，
+     少了这条，「关掉动效」对唯一一处持续动画的组件不起作用。 */
+  progress::-webkit-progress-bar, progress::-webkit-progress-value {
+    animation: none !important; transition: none !important;
+  }
 }

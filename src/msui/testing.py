@@ -55,6 +55,7 @@ from .resources import BASE_CSS_NAME, TOKENS_CSS_NAME
 __all__ = [
     "ALLOWED_HEX_FILE_NAMES",
     "BASE_TOKEN_PAIRS",
+    "CONTROL_MINIMUM",
     "DISABLED_MINIMUM",
     "HEX_COLOR_RE",
     "HEX_LITERAL_RE",
@@ -78,14 +79,16 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # 阈值档位（WCAG 2.x）
 #
-# 没有单列「控件 3.0」一档：基础登记表全是文字与分隔线，没有一条图形控件
-# 登记项——挂一个没人用的常量只会让人误以为哪里用到了它。消费者的页面真
-# 有图形控件（图标、开关这类）要登记时，档位数值就是 3.0，直接写数或自定
-# 常量都行。
+# 「控件 3.0」这一档真有人用：base.css 里主按钮的填充/描边（--brand 对卡片底、
+# 窗底）与 <progress> 的填充（--brand 对轨道）都挂在它上面。它与
+# DISABLED_MINIMUM 数值相同、含义不同：一个是「弱化文字还看得见」，一个是
+# 「图形控件的形状分得出来」（WCAG 1.4.11），各自独立，谁改档位都不该顺手动到
+# 另一个。
 # ---------------------------------------------------------------------------
 
 TEXT_MINIMUM = 4.5  # 正文文字
 DISABLED_MINIMUM = 3.0  # 弱化文字：版本号、占位符这类「看得见就行」
+CONTROL_MINIMUM = 3.0  # 图形控件：进度条填充、图标、开关这类非文字的形状
 SEPARATOR_MINIMUM = 1.3  # 纯装饰分隔线：只要求还看得见
 
 
@@ -145,13 +148,14 @@ def merge_tokens(
 HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 # tokens.css 里值不是纯 `#rrggbb` 的变量，在这里显式登记、跳过对比度断言。
-# 两类：rgba() 半透明晕染（底色、边框、hover 提亮罩这类叠加层，本身不承担
-# 「看得清」的职责——可读性由画在它们上面的实色前景承担，那些前景各自的
-# 组合已在登记表里）；以及压根不是颜色的量值 token（字号档）。每一条都应
-# 能在 tokens.css 里对应变量旁找到说明。
+# 两类：rgba() 半透明晕染（底色、边框、hover 提亮罩、模态遮罩这类叠加层，本身
+# 不承担「看得清」的职责——可读性由画在它们上面的实色前景承担，那些前景各自的
+# 组合已在登记表里）；以及压根不是颜色的量值 token（字号档、字体族、宽度档）。
+# 每一条都应能在 tokens.css 里对应变量旁找到说明。
 NON_HEX_TOKENS = frozenset(
     {
         "font-display",  # 展示型大读数的字号档——量值，不是颜色
+        "font-mono",  # 日志区的等宽字体族——字体族，不是颜色
         "space-1",  # 间距体系：4px 基线的六档——量值，不是颜色
         "space-2",
         "space-3",
@@ -159,17 +163,21 @@ NON_HEX_TOKENS = frozenset(
         "space-5",
         "space-6",
         "content-max",  # 内容列宽（body 即容器的 max-width）——量值，不是颜色
+        "field-label",  # 表单行的标签列宽（.field 的对齐基准）——量值，不是颜色
         "error-bg",  # error 系半透明底
         "error-strip-border",  # error 系半透明边框
         "error-wash",  # error 系 hover 提亮罩
-        "warn-bg",  # warn 状态徽章的半透明底
-        "info-bg",  # info 状态徽章的半透明底
-        "ok-bg",  # ok 状态徽章的半透明底
+        "warn-bg",  # warn 状态徽章 / .notice.warn 的半透明底
+        "info-bg",  # info 状态徽章 / .notice.info 的半透明底
+        "ok-bg",  # ok 状态徽章 / .notice.ok 的半透明底
         "brand-tint",  # brand 系渐变深端
         "brand-tint-weak",  # brand 系渐变浅端
         "brand-tint-border",  # brand 系半透明边框
-        "track",  # 进度条轨道的半透明底
-        "wash",  # hover 提亮罩
+        # 注意：--track（进度条轨道）**不在**这里。它曾经是半透明提亮罩，现在
+        # 是实色凹陷底，正常参与对比度断言——它与 --brand 填充直接相邻，控件档
+        # 3.0 就卡在那一对上，白名单一放它进来那条闸门就形同虚设。
+        "wash",  # hover 提亮罩 / 中性提示条底
+        "scrim",  # 模态对话框 ::backdrop 的半透明遮罩
     }
 )
 
@@ -232,6 +240,15 @@ class TokenPair:
 # 悬停，hover 瞬间也不许变得看不清。error 与 brand 是两个变量、分立登记，
 # 永不共用同一条。`bg`（窗口外的舞台底）上 base.css 不画任何前景，所以基础
 # 表没有它的条目——消费者在舞台底上画字时自己追加。
+#
+# 二级表面（模态对话框、内联提示条、日志区）为什么没有新增条目：它们画字的
+# 底最终还是这几种实色。对话框的底是 --card（遮罩 --scrim 铺在它**下面**，
+# 不参与对话框内的对比度）；提示条四个状态的 --*-bg 与中性档的 --wash 都是
+# 半透明晕染，按上面白名单里的同一条惯例，承担「看得清」的是透出来的 card /
+# win 实色底，而 error / warn / info / ok / text-dim 对这两个底的组合上面全
+# 都登记着；日志区的底是 --win、字是 --text-dim，同样已在表内。
+# 换句话说这三样是**复用**登记项而不是绕过闸门——真新添一种实色底（比如给
+# 日志区换个自己的底色）时，就得在这里加条目。
 BASE_TOKEN_PAIRS: tuple[TokenPair, ...] = (
     # ---- 正文（4.5）：card 底 + card-hover 底 ----
     TokenPair("主文字 text（card 底）", "text", "card", TEXT_MINIMUM),
@@ -256,6 +273,33 @@ BASE_TOKEN_PAIRS: tuple[TokenPair, ...] = (
     # ---- 主按钮（4.5）：text 画在 brand 底上；hover 态换 brand-down 底 ----
     TokenPair("主按钮文字 text（brand 底）", "text", "brand", TEXT_MINIMUM),
     TokenPair("主按钮文字 text（brand-down 底）", "text", "brand-down", TEXT_MINIMUM),
+    # ---- 图形控件（3.0）：brand 这块颜色四周挨着的每一种底 ----
+    # 一个前景可以同时有好几条真实相邻关系，各自单独登记；判断标准是「页面上
+    # 这两块颜色是不是边挨边」，不是「哪条数字最紧」。brand 有三条：
+    #
+    #   · 主按钮的填充与 1px 描边都是 --brand（base.css 的
+    #     `button.primary { background: var(--brand); border-color: var(--brand) }`），
+    #     按钮四周就是卡片底或窗底，所以 brand vs card、brand vs win 两条都在。
+    #     按钮的**形状边界**靠这两条撑着，WCAG 1.4.11 要的就是它。
+    #   · 进度条填充画在轨道上，所以还有 brand vs track 一条。
+    #
+    # 前一版这三条只留了 track：当时前两条的**描述**写错了（写成「进度条填充」，
+    # 而它们实际描述的是主按钮），修的人把标签当成了内容，连颜色组合一起删掉。
+    # 颜色组合本身一直是页面上真实存在的——错的是标签，不是颜色。
+    # 而且删掉的恰恰是紧的那两条：track(#0b0b0d) 比 card(#1a1a1f) 更暗，
+    # brand vs card 永远比 brand vs track 更紧，只留 track 等于闸门在放水
+    # （实测把 --brand 调成 #c00219：card 2.69、win 2.86 双双掉档，track 还有
+    # 3.06 挂着过关，全表报「无，全绿」）。
+    #
+    # 对照：次要按钮的边界走 --border-hover，vs card-hover / vs win 两条都登记
+    # 着（见下面分隔线那一节）；主按钮不该比它少。
+    TokenPair("主按钮填充/边界 brand（card 底）", "brand", "card", CONTROL_MINIMUM),
+    TokenPair("主按钮填充/边界 brand（win 底）", "brand", "win", CONTROL_MINIMUM),
+    # 进度条填充紧挨着的是轨道，不是轨道下面的 card / win —— 轨道挡在中间。
+    # 轨道还是半透明提亮罩的那阵子，brand 对轨道只有 2.56:1，过不了控件档；
+    # 现在轨道是实色凹陷底，实测 3.78:1（数字与取值理由见 tokens.css 的
+    # --track 注释）。
+    TokenPair("进度条填充 brand（track 底）", "brand", "track", CONTROL_MINIMUM),
     # ---- 弱化文字（3.0）：muted 是「看得见就行」档 ----
     TokenPair("弱化文字 muted（card 底）", "muted", "card", DISABLED_MINIMUM),
     TokenPair("弱化文字 muted（card-hover 底）", "muted", "card-hover", DISABLED_MINIMUM),
@@ -263,6 +307,10 @@ BASE_TOKEN_PAIRS: tuple[TokenPair, ...] = (
     # ---- 分隔线（1.3）：纯装饰，只要求还看得见 ----
     TokenPair("分隔线 border（card 底）", "border", "card", SEPARATOR_MINIMUM),
     TokenPair("分隔线 border（win 底）", "border", "win", SEPARATOR_MINIMUM),
+    # 进度条的描边：凹陷式轨道自己陷进底色里（对 card 只有 1.13:1，够不到这一
+    # 档），「这里有一条槽」改由这圈 1px --border 画出来。它两边各挨一种颜色，
+    # 所以两边都要登记：外侧对卡片那条就是上面那一条，内侧对轨道是下面这条。
+    TokenPair("进度条描边 border（track 底）", "border", "track", SEPARATOR_MINIMUM),
     TokenPair("分隔线 border-hover（card-hover 底）", "border-hover", "card-hover", SEPARATOR_MINIMUM),
     TokenPair("分隔线 border-hover（win 底）", "border-hover", "win", SEPARATOR_MINIMUM),
 )

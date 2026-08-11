@@ -7,6 +7,12 @@
   没有主角读数的页面删掉那一行即可。
   卡片里只装按钮时给它同时挂 .actions：按钮横排、间距走档、窄窗自动折行；
   要让按钮居中，再加一个 .center。
+  「表单 + 进度 + 日志」这种形态的页面从下面几块起步：一行三件（标签 + 输入框
+  + 尾部按钮）给容器挂 .field；进度直接写裸 <progress>，不给 value 就是算不出
+  百分比时的不定态；校验/结果提示挂 .notice + 一个状态（error/warn/info/ok），
+  收放用 hidden 属性；跑批日志用 <pre class="log">（等宽、自己滚、长行横滚）。
+  破坏性动作的确认用下面那个 <dialog> + showModal()，**绝不用 JS 的
+  confirm()**（它会阻塞 webview 的消息循环）。用不上的整块删掉即可。
 -->
 <html lang="zh-CN">
 <head>
@@ -19,9 +25,39 @@
   <h1>应用名</h1>
   <p>一句话说明这个小工具是干什么的。</p>
   <output class="display">0</output>
+  <div class="card">
+    <div class="field">
+      <label for="src">某某目录</label>
+      <input id="src">
+      <button>浏览</button>
+    </div>
+    <progress max="100" value="0"></progress>
+    <p class="notice error" id="tip" hidden>校验没过的原因写这里。</p>
+  </div>
+  <div class="card">
+    <pre class="log" id="log"></pre>
+  </div>
   <div class="card actions">
-    <button class="primary">主操作</button>
+    <button class="primary" id="start">主操作</button>
     <button>次要操作</button>
   </div>
+  <dialog id="confirm">
+    <h2>确定要继续吗？</h2>
+    <p>这个动作不可逆，把后果写清楚：动了哪些文件、失败了要怎么收尾。</p>
+    <div class="actions">
+      <button id="confirm-no">取消</button>
+      <button class="primary" id="confirm-yes">确定</button>
+    </div>
+  </dialog>
+  <script>
+    // 破坏性动作先弹模态确认，绝不用 confirm()（阻塞消息循环）。
+    const dlg = document.getElementById("confirm");
+    document.getElementById("start").addEventListener("click", () => dlg.showModal());
+    document.getElementById("confirm-no").addEventListener("click", () => dlg.close("no"));
+    document.getElementById("confirm-yes").addEventListener("click", () => {
+      dlg.close("yes");
+      document.getElementById("tip").hidden = true; // 提示条的收放就是 hidden
+    });
+  </script>
 </body>
 </html>
