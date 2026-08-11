@@ -268,8 +268,26 @@ def test_exit_prints_all_failures_and_raises_system_exit_1(capsys):
 
 def test_exit_prints_pass_marker_when_green(capsys):
     driver = SmokeDriver(_noop_script)
+    driver(FakeWindow())
     driver.exit()
     assert "冒烟通过" in capsys.readouterr().out
+
+
+def test_exit_fails_when_the_script_never_ran(capsys):
+    """`on_ready` 从没被触发过 → 不算通过，退出码 1。
+
+    「没跑」与「跑了全绿」在 failures 上是同一个形状（空清单），骨架必须
+    自己分得清，否则任何让 run() 提前返回的情况都会静静地报「冒烟通过」——
+    单实例守卫拦下第二实例（票 12）正是这样一条路径，开窗失败、页面根本
+    没加载也是。冒烟的价值全在「没验成时看得出来」。
+    """
+    driver = SmokeDriver(_noop_script)
+
+    with pytest.raises(SystemExit) as excinfo:
+        driver.exit()
+
+    assert excinfo.value.code == 1
+    assert "冒烟脚本从未跑过" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +310,7 @@ def test_exit_disarms_the_watchdog(monkeypatch):
     monkeypatch.setattr(os, "_exit", lambda code: calls.append(code))
 
     driver = SmokeDriver(_noop_script, watchdog=0.05)
+    driver(FakeWindow())
     driver.exit()
     time.sleep(0.2)
 

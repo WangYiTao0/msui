@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from msui import shell
+from msui import shell, single_instance
 
 
 # ---------------------------------------------------------------------------
@@ -478,6 +478,132 @@ def test_run_without_an_icon_does_not_invent_one(monkeypatch):
 
     _args, kwargs = calls.start[0]
     assert kwargs.get("icon") is None
+
+
+# ---------------------------------------------------------------------------
+# 单实例守卫：默认不限制；限制时第二实例连窗口都不建（票 12）
+# ---------------------------------------------------------------------------
+
+
+def _stub_guard(monkeypatch, *, allowed: bool):
+    """把守卫两个函数换成探针：记下收到的参数，acquire 按 `allowed` 作答。"""
+    seen = SimpleNamespace(acquire=[], raise_window=[])
+    monkeypatch.setattr(
+        single_instance,
+        "acquire",
+        lambda app_id: seen.acquire.append(app_id) or allowed,
+    )
+    monkeypatch.setattr(
+        single_instance,
+        "raise_existing_window",
+        lambda title: seen.raise_window.append(title) or False,
+    )
+    return seen
+
+
+def test_run_does_not_guard_by_default(monkeypatch):
+    """默认 `single_instance=None` = 不限制：守卫压根不被调用，现有消费者
+    （以及同时开两份的用法）行为一个字都不变。"""
+    calls = _install_fake_webview(monkeypatch)
+    seen = _stub_guard(monkeypatch, allowed=True)
+
+    shell.run(PAGE)
+
+    assert seen.acquire == []
+    assert calls.order == ["create_window", "start"]
+
+
+def test_run_with_single_instance_acquires_that_id(monkeypatch):
+    """给了 id 就拿这个 id 去抢锁——值用 miniprog.toml 的 id，全局唯一现成。"""
+    calls = _install_fake_webview(monkeypatch)
+    seen = _stub_guard(monkeypatch, allowed=True)
+
+    shell.run(PAGE, single_instance="counter")
+
+    assert seen.acquire == ["counter"]
+    assert calls.order == ["create_window", "start"]  # 第一实例照常开窗
+
+
+def test_second_instance_creates_no_window_at_all(monkeypatch):
+    """抢不到锁 = 已有实例在跑：不建窗、不进主循环、静默返回。"""
+    calls = _install_fake_webview(monkeypatch)
+    _stub_guard(monkeypatch, allowed=False)
+
+    shell.run(PAGE, single_instance="counter")
+
+    assert calls.order == []
+
+
+def test_second_instance_tries_to_raise_the_existing_window_by_title(monkeypatch):
+    """先尽力把已开的窗带到前台，找的就是本次 run 会用的那个标题——用户的
+    意图是「打开它」，能把老窗端到眼前就等于满足了。"""
+    _install_fake_webview(monkeypatch)
+    seen = _stub_guard(monkeypatch, allowed=False)
+
+    shell.run(PAGE, single_instance="counter", title="计数器")
+
+    assert seen.raise_window == ["计数器"]
+
+
+def test_second_instance_never_touches_the_first_instances_storage(monkeypatch, tmp_path):
+    """第二实例不许碰 storage：purge 会把**第一实例正开着的窗**的缓存整个
+    推倒重建。所以守卫必须判在 purge/mkdir 之前，不只是 create_window 之前。"""
+    _install_fake_webview(monkeypatch)
+    _stub_guard(monkeypatch, allowed=False)
+    storage = tmp_path / "webview"
+    purges: list = []
+    monkeypatch.setattr(
+        shell, "purge_stale_webview_storage", lambda *a: purges.append(a) or True
+    )
+
+    shell.run(PAGE, single_instance="counter", storage_dir=storage, version="1.0.0")
+
+    assert purges == []
+    assert not storage.exists()
+
+
+def test_second_instance_exits_without_importing_webview(monkeypatch):
+    """第二实例连 pywebview 都不 import——「不初始化 webview」的可判据形态：
+    把 sys.modules['webview'] 顶成 None（import 会当场 ImportError），守卫
+    路径若还去 import 它，这条测试立刻红。"""
+    monkeypatch.setitem(sys.modules, "webview", None)
+    _stub_guard(monkeypatch, allowed=False)
+
+    shell.run(PAGE, single_instance="counter")  # 不抛 = 通过
+
+
+def test_second_instance_exits_silently_even_if_raising_blows_up(monkeypatch):
+    """带前台那一步炸了也只是静默退出：第二实例**绝不弹错误框**，也绝不
+    把异常摔到用户脸上——用户语义是「我想打开它」，报错是在惩罚这个意图。"""
+    _install_fake_webview(monkeypatch)
+    monkeypatch.setattr(single_instance, "acquire", lambda _app_id: False)
+
+    def boom(_title):
+        raise RuntimeError("user32 不在")
+
+    monkeypatch.setattr(single_instance, "raise_existing_window", boom)
+
+    shell.run(PAGE, single_instance="counter")  # 不抛 = 通过
+
+
+def test_second_instance_logs_exactly_one_line(monkeypatch, caplog):
+    """日志一行：出问题时日志里答得出「第二实例被守卫拦下了」，但不刷屏。"""
+    _install_fake_webview(monkeypatch)
+    _stub_guard(monkeypatch, allowed=False)
+
+    with caplog.at_level("INFO", logger="msui.shell"):
+        shell.run(PAGE, single_instance="counter")
+
+    assert len(caplog.records) == 1
+
+
+def test_guard_path_pops_no_dialog():
+    """形态守卫：壳与守卫模块里不许出现任何弹框 API——「静默退出」是契约，
+    哪天有人「好心」加个提示框，这条当场红。"""
+    for module in (shell, single_instance):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        for banned in ("MessageBox", "messagebox", "create_confirmation_dialog", "alert("):
+            assert banned not in source, f"{module.__name__} 里出现了弹框 API：{banned}"
 
 
 # ---------------------------------------------------------------------------

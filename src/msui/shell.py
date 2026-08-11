@@ -22,6 +22,9 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+# 起个别名：`single_instance` 这个名字留给 run() 的同名参数（票 12 定的 API
+# 形态），模块本体在函数体里按 `guard.` 访问，不被参数遮蔽。
+from msui import single_instance as guard
 from msui.chrome import apply_dark_chrome
 
 __all__ = [
@@ -89,6 +92,7 @@ def run(
     storage_dir: str | Path | None = None,
     version: str | None = None,
     hidden: bool = False,
+    single_instance: str | None = None,
     before_start: Callable[..., object] | None = None,
     on_ready: Callable[..., object] | None = None,
 ) -> None:
@@ -135,7 +139,28 @@ def run(
 
     `on_ready(window)`：窗口起来后在 pywebview 的后台线程里被调用的钩子，
     给自动驾驶/无头驱动用；不传就是纯开窗。
+
+    `single_instance`：给了就开单实例守卫，值是这个小程序的 id（用
+    miniprog.toml 的 id，全局唯一现成）。同 id 已有实例在跑时，本次调用
+    **什么都不做直接返回**——不建窗、不碰 storage、连 pywebview 都不 import；
+    先尽力把已开的那扇窗按 `title` 带到前台，带不动就静默退出（日志一行，
+    绝不弹错误框：用户的语义是「我想打开它」）。默认 None = 不限制，现有
+    消费者行为一个字不变。机制与降级纪律见 :mod:`msui.single_instance`。
     """
+    # 守卫判在最前面：晚于 purge 的话，第二实例会把**第一实例正开着的窗**的
+    # webview 缓存整个推倒重建（有测试钉着顺序）。
+    if single_instance is not None and not guard.acquire(single_instance):
+        try:
+            raised = guard.raise_existing_window(title)
+        except Exception:  # noqa: BLE001 - 带前台是尽力而为，炸了也只是静默退出
+            raised = False
+        _log.info(
+            "单实例守卫：已有实例在跑（id=%s），带前台%s，本实例退出",
+            single_instance,
+            "成功" if raised else "未成功",
+        )
+        return
+
     import webview
 
     storage: Path | None = Path(storage_dir) if storage_dir is not None else None

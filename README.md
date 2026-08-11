@@ -15,7 +15,7 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 两处版本号**：
 
 ```
-msui @ https://github.com/WangYiTao0/msui/releases/download/v0.4.1/msui-0.4.1-py3-none-any.whl
+msui @ https://github.com/WangYiTao0/msui/releases/download/v0.5.0/msui-0.5.0-py3-none-any.whl
 ```
 
 另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
@@ -39,6 +39,8 @@ pip install pytest
 三步：定位页面目录 → copy_assets 落共享样式 → run 开窗。
 页面要调 Python 时把 js_api 对象递给 run（方法包 Serializer：连点丢弃、
 不排队），页面那半边的写法见 pages/index.html 尾部的 <script>。
+`single_instance` 给了 id 就只开一扇窗：用户连点图标时第二个进程把已开的
+窗带到前台、自己静默退出（值用小程序自己的 id，全局唯一）。
 环境变量 APP_SMOKE=1 时隐藏开窗、SmokeDriver 自动驾驶一轮（等桥往返、
 核对样式真的生效、横幅钉住版本）后自关——给 CI/无人值守冒烟用；自己的仓
 不需要冒烟的话，把 make_smoke_script 和 driver 相关几行删掉即可。
@@ -57,7 +59,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.4.1"
+MSUI_PINNED = "0.5.0"
 
 
 class Api:
@@ -129,6 +131,7 @@ def main() -> None:
         serve_dir / "index.html",
         js_api=Api(),
         title="示例小程序",
+        single_instance="msui-example-minimal",  # 连点图标只开一扇窗
         hidden=driver is not None,
         on_ready=driver,
     )
@@ -168,6 +171,27 @@ if __name__ == "__main__":
    `{"busy": false, "data": …}` 信封；拿到 `busy: true` 表示上一次调用还在
    处理中，**就地 `return` 丢弃本次、绝不排队**（排队会把「连点五下」攒成
    执行五次）。
+
+### 单实例：连点图标只开一扇窗
+
+`run(..., single_instance="<小程序 id>")` 一个参数接入（值用 `miniprog.toml`
+的 id，全局唯一现成）。**默认 `None` = 不限制**，不传的仓行为一个字不变。
+
+同 id 已有实例在跑时，第二个进程：
+
+- **不建窗、不碰 storage、连 pywebview 都不 import**，`run(...)` 直接返回；
+- 先尽力把已开的那扇窗按 `title` **带到前台**（Windows 对抢焦点有权限限制，
+  带不动很正常）；
+- 带不动就**静默退出**，日志一行。**绝不弹错误框**——用户按下图标的语义是
+  「我想打开它」，弹错是在惩罚这个意图。
+
+机制：Windows 命名 mutex（`Local\msui-<id>`），POSIX 用 flock 锁文件等价实现。
+选内核对象而不是「锁文件存在即占用」就是为了**没有 stale 态**——上一次崩溃
+或被任务管理器杀掉，不会把小程序永久锁死。加锁机制自身出错（权限、临时目录
+不可写……）一律**放行**：守卫是来拦多余的窗的，不能成为「打不开」的新理由。
+
+接冒烟时注意：守卫拦下时 `on_ready` 从不触发，`SmokeDriver` 会因此判
+「冒烟脚本从未跑过」直接报失败（退出码 1），不会静静报绿。
 
 ## 3. 页面写语义 HTML
 
@@ -444,7 +468,7 @@ base.css
 ```text
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
-   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.4.1/msui-0.4.1-py3-none-any.whl
+   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.5.0/msui-0.5.0-py3-none-any.whl
    另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
    要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
@@ -475,7 +499,10 @@ base.css
     rgb 与元素实测 computedStyle 比对）。
 11. 展示型大读数（计数器主角数字这类）给元素挂 .display 类：成块居中、
     字号走 --font-display 档（48px），不自己写字号、不自己居中。
-12. 版式零决策：body 就是容器——边距、内容列宽、垂直节奏由 base.css 落在
+12. 单实例：run(..., single_instance="<miniprog.toml 的 id>")，连点图标只开
+    一扇窗——第二个进程把已开的窗带到前台，带不动就静默退出（绝不弹错误
+    框）。默认 None = 不限制。
+13. 版式零决策：body 就是容器——边距、内容列宽、垂直节奏由 base.css 落在
     body 上，没有 .page 容器类；新页面从 msui README §3 的「标准单列页
     骨架」可抄块起步，不写任何版式 CSS，间距要自取时用 --space-1…6 档。
 ```

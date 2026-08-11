@@ -7,6 +7,8 @@
     ``copy_assets``（启动时落进页面目录，头部带版本横幅）；
   - :mod:`msui.shell` —— ``run(...)`` 一行开 pywebview 窗口；
   - :mod:`msui.chrome` —— Windows 原生标题栏按 tokens 染深（run 内部已接）；
+  - :mod:`msui.single_instance` —— 单实例守卫（``run(single_instance=id)``
+    内部已接：连点图标只开一扇窗）；
   - :mod:`msui.bridge` —— js_api 桥的通用件（串行化、忙碌应答、前端日志）；
   - :mod:`msui.testing` —— 样式闸门函数库（对比度校验、防游离色值扫描）。
 

@@ -3,6 +3,8 @@
 三步：定位页面目录 → copy_assets 落共享样式 → run 开窗。
 页面要调 Python 时把 js_api 对象递给 run（方法包 Serializer：连点丢弃、
 不排队），页面那半边的写法见 pages/index.html 尾部的 <script>。
+`single_instance` 给了 id 就只开一扇窗：用户连点图标时第二个进程把已开的
+窗带到前台、自己静默退出（值用小程序自己的 id，全局唯一）。
 环境变量 APP_SMOKE=1 时隐藏开窗、SmokeDriver 自动驾驶一轮（等桥往返、
 核对样式真的生效、横幅钉住版本）后自关——给 CI/无人值守冒烟用；自己的仓
 不需要冒烟的话，把 make_smoke_script 和 driver 相关几行删掉即可。
@@ -21,7 +23,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.4.1"
+MSUI_PINNED = "0.5.0"
 
 
 class Api:
@@ -93,6 +95,7 @@ def main() -> None:
         serve_dir / "index.html",
         js_api=Api(),
         title="示例小程序",
+        single_instance="msui-example-minimal",  # 连点图标只开一扇窗
         hidden=driver is not None,
         on_ready=driver,
     )

@@ -388,6 +388,7 @@ class SmokeDriver:
         self._script = script
         self._timeout = timeout
         self._deadline: float | None = None
+        self._ran = False
         self.failures: list[str] = []
         self._watchdog = threading.Timer(watchdog, self._abort)
         self._watchdog.daemon = True
@@ -402,6 +403,7 @@ class SmokeDriver:
 
     def __call__(self, window: Any) -> None:
         """``on_ready`` 钩子本体（pywebview 后台线程）：跑脚本，finally 销毁窗口。"""
+        self._ran = True  # exit() 据此分辨「跑了全绿」与「压根没跑」
         self._deadline = time.monotonic() + self._timeout
         try:
             self._script(self, window)
@@ -507,8 +509,15 @@ class SmokeDriver:
         有失败：逐条打印后 ``sys.exit(1)``；全绿：打印「冒烟通过」正常返回。
         print 一律 flush——冻结产物 stdout 重定向到 CI 日志时是块缓冲，
         不 flush 顺序会乱。
+
+        「脚本压根没跑过」单独判一条：它与「跑了全绿」在 failures 上是同一个
+        形状（空清单），不分开就等于任何让 ``run()`` 提前返回的路径都会静静
+        报「冒烟通过」——单实例守卫拦下第二实例（票 12）、开窗直接失败，都是
+        这样的路径。核实动作自己失败时必须看得出来。
         """
         self._watchdog.cancel()
+        if not self._ran:
+            self.fail("冒烟脚本从未跑过（on_ready 没被触发：窗口没开起来？被守卫拦下了？）")
         if self.failures:
             for line in self.failures:
                 print(f"冒烟失败：{line}", flush=True)
