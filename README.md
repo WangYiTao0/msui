@@ -15,7 +15,7 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 两处版本号**：
 
 ```
-msui @ https://github.com/WangYiTao0/msui/releases/download/v0.5.0/msui-0.5.0-py3-none-any.whl
+msui @ https://github.com/WangYiTao0/msui/releases/download/v0.6.0/msui-0.6.0-py3-none-any.whl
 ```
 
 另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
@@ -59,7 +59,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.5.0"
+MSUI_PINNED = "0.6.0"
 
 
 class Api:
@@ -112,6 +112,20 @@ def make_smoke_script(serve_dir: Path):
             "center 48px",
         )
         drive.check(readout == "center 48px", f".display 该居中吃 48px 档，实测 {readout!r}")
+        # 操作行：两个按钮横排、顶边齐平。齐平这半边验的是 `.actions > * + *`
+        # 的归零真压过了 `.card > * + *` 的竖向节奏——两者特异性同为 (0,1,1)，
+        # 靠源码顺序决胜，规则写反时第二个按钮会掉下去半行。CSS 文本层的顺序
+        # 由 tests/test_layout.py 盯着，这里盯的是渲染出来真是那样。
+        row = drive.wait_js(
+            window,
+            "(() => { const bs = document.querySelectorAll('.actions button');"
+            " if (bs.length !== 2) return 'missing';"
+            " const [a, b] = [...bs].map(el => el.getBoundingClientRect());"
+            " if (Math.abs(a.top - b.top) > 1) return 'stacked';"
+            " return b.left >= a.right ? 'row' : 'overlap'; })()",
+            "row",
+        )
+        drive.check(row == "row", f"操作行里两个按钮该横排且顶边齐平，实测 {row!r}")
         # 横幅钉版：落地 css 第一行 == "/* msui <钉的版本> */"。横幅只证明
         # css 落了地，「页面吃进去了」由上面 check_token_style 证明，两条各管一半。
         banner = (serve_dir / "tokens.css").read_text(encoding="utf-8").splitlines()[0]
@@ -208,6 +222,8 @@ if __name__ == "__main__":
   全由 base.css 落在 body 上；不存在也不需要 .page 之类的容器类，裸语义
   HTML 零 class 就有边距与节奏。.display 挂在主角读数上（增强，不是必需），
   没有主角读数的页面删掉那一行即可。
+  卡片里只装按钮时给它同时挂 .actions：按钮横排、间距走档、窄窗自动折行；
+  要让按钮居中，再加一个 .center。
 -->
 <html lang="zh-CN">
 <head>
@@ -220,7 +236,7 @@ if __name__ == "__main__":
   <h1>应用名</h1>
   <p>一句话说明这个小工具是干什么的。</p>
   <output class="display">0</output>
-  <div class="card">
+  <div class="card actions">
     <button class="primary">主操作</button>
     <button>次要操作</button>
   </div>
@@ -258,6 +274,11 @@ if __name__ == "__main__":
   <div class="card">
     <h2>操作区</h2>
     <input placeholder="输入点什么">
+  </div>
+  <!-- 整张卡只装按钮时，card 自己兼作 .actions（按钮横排、间距走档）。
+       卡里还有别的内容时，按钮组另包一层 <div class="actions"> 即可，
+       两种写法长相一致。 -->
+  <div class="card actions">
     <button class="primary">主操作</button>
     <button>次要操作</button>
   </div>
@@ -296,6 +317,13 @@ if __name__ == "__main__":
 展示型大读数（计数器、倒计时这类页面的主角数字）给承载元素挂 `.display`
 类：成块居中、字号走 tokens 的 `--font-display` 档（48px）、数字等宽不晃动、
 上下自带一档内衬，照样零自定义样式。
+
+一组按钮给它们的容器挂 `.actions`：横排、间距走 `--space-3` 档、窄窗自动
+折行。**默认左对齐**（跟着文字流的左边缘最好扫）；要居中再加一个 `.center`。
+容器可以是卡片自己（`<div class="card actions">`，整张卡只装按钮时），也可以
+是卡片里单独包的一层（卡里还有标题、输入框这些别的内容时）。别自己写
+`text-align` / `display: flex` ——不挂 `.actions` 的按钮会竖着堆起来，那是
+卡片的垂直节奏在起作用，不是缺样式。
 
 ## 4. override.css（默认不用）
 
@@ -468,7 +496,7 @@ base.css
 ```text
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
-   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.5.0/msui-0.5.0-py3-none-any.whl
+   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.6.0/msui-0.6.0-py3-none-any.whl
    另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
    要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
@@ -498,7 +526,9 @@ base.css
     超时兜底都由它代办；样式生效断言用它的 check_token_style（token 解成
     rgb 与元素实测 computedStyle 比对）。
 11. 展示型大读数（计数器主角数字这类）给元素挂 .display 类：成块居中、
-    字号走 --font-display 档（48px），不自己写字号、不自己居中。
+    字号走 --font-display 档（48px），不自己写字号、不自己居中。一组按钮
+    给容器挂 .actions（横排、间距走档、窄窗折行），要居中再加 .center；
+    不挂 .actions 的按钮会竖着堆起来（卡片垂直节奏在起作用，不是缺样式）。
 12. 单实例：run(..., single_instance="<miniprog.toml 的 id>")，连点图标只开
     一扇窗——第二个进程把已开的窗带到前台，带不动就静默退出（绝不弹错误
     框）。默认 None = 不限制。

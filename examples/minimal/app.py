@@ -23,7 +23,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.5.0"
+MSUI_PINNED = "0.6.0"
 
 
 class Api:
@@ -76,6 +76,20 @@ def make_smoke_script(serve_dir: Path):
             "center 48px",
         )
         drive.check(readout == "center 48px", f".display 该居中吃 48px 档，实测 {readout!r}")
+        # 操作行：两个按钮横排、顶边齐平。齐平这半边验的是 `.actions > * + *`
+        # 的归零真压过了 `.card > * + *` 的竖向节奏——两者特异性同为 (0,1,1)，
+        # 靠源码顺序决胜，规则写反时第二个按钮会掉下去半行。CSS 文本层的顺序
+        # 由 tests/test_layout.py 盯着，这里盯的是渲染出来真是那样。
+        row = drive.wait_js(
+            window,
+            "(() => { const bs = document.querySelectorAll('.actions button');"
+            " if (bs.length !== 2) return 'missing';"
+            " const [a, b] = [...bs].map(el => el.getBoundingClientRect());"
+            " if (Math.abs(a.top - b.top) > 1) return 'stacked';"
+            " return b.left >= a.right ? 'row' : 'overlap'; })()",
+            "row",
+        )
+        drive.check(row == "row", f"操作行里两个按钮该横排且顶边齐平，实测 {row!r}")
         # 横幅钉版：落地 css 第一行 == "/* msui <钉的版本> */"。横幅只证明
         # css 落了地，「页面吃进去了」由上面 check_token_style 证明，两条各管一半。
         banner = (serve_dir / "tokens.css").read_text(encoding="utf-8").splitlines()[0]

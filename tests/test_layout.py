@@ -37,6 +37,19 @@ def rule(selector: str) -> str:
     return match.group(1)
 
 
+def rule_pos(selector: str) -> int:
+    """那条规则在 base.css 里的位置，用于比较两条规则的先后。
+
+    同样行首锚定，理由比 `rule()` 更硬：base.css 的注释里**逐字写着**
+    `.card > * + *` / `.actions > * + *` 这些选择器（解释特异性同分时靠源码
+    顺序决胜）。裸 `BASE.index(selector)` 会先命中注释里那处，比较的就成了
+    注释的先后——注释挪一下位置，测试照样绿，而真规则可能已经失效。
+    """
+    match = re.search("(?m)^" + re.escape(selector) + r"\s*\{", BASE)
+    assert match, f"base.css 里找不到选择器 {selector!r} 的规则"
+    return match.start()
+
+
 # ---------------------------------------------------------------------------
 # 间距 token 体系
 # ---------------------------------------------------------------------------
@@ -137,3 +150,44 @@ def test_display_font_step_fits_a_small_tool_window():
 def test_card_padding_uses_the_scale():
     card = rule(".card")
     assert re.search(r"padding: var\(--space-\d\)", card)
+
+
+# ---------------------------------------------------------------------------
+# 操作行：一组按钮横排
+# ---------------------------------------------------------------------------
+
+
+def test_actions_is_a_wrapping_flex_row():
+    """按钮组横排、窄窗折行；按钮之间的间距同样只走间距档。"""
+    actions = rule(".actions")
+    assert "display: flex" in actions
+    assert "flex-wrap: wrap" in actions, "窄窗放不下时要折行，不许横向溢出"
+    assert re.search(r"gap: var\(--space-\d\)", actions), "按钮间距必须走间距档"
+
+
+def test_actions_centering_is_opt_in():
+    """默认左对齐（跟着文字流的左边缘最好扫），居中是显式加 .center 才有。
+
+    `.actions` 自己不许出现 justify-content —— 写了就等于把居中变成默认，
+    `.center` 这个开关也就没有意义了。
+    """
+    assert "justify-content" not in rule(".actions")
+    assert "justify-content: center" in rule(".actions.center")
+
+
+def test_actions_kills_the_card_rhythm_and_wins_by_source_order():
+    """`.actions > * + *` 必须写在 `.card > * + *` **之后**才生效。
+
+    两条选择器特异性同为 (0,1,1)，同分时靠源码顺序决胜。位置一旦上移到垂直
+    节奏那一节，卡片里的按钮组从第二个按钮起会带 margin-top，在 flex 行里
+    表现为按钮高低不齐 —— 这正是 `<div class="card actions">` 的常规写法。
+
+    位置比较走 `rule_pos`（行首锚定），不用 `BASE.index`：base.css 的注释里
+    逐字写着这两个选择器，朴素查找会先命中注释。
+    """
+    assert re.search(r"margin-top:\s*0\s*;", rule(".actions > * + *")), (
+        "卡片给的竖向节奏必须在操作行里归零"
+    )
+    assert rule_pos(".actions > * + *") > rule_pos(".card > * + *"), (
+        "顺序反了：.actions 的归零会被 .card 的节奏盖掉（特异性同分，后来者胜）"
+    )

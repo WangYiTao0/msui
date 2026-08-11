@@ -80,6 +80,17 @@ button.primary, .btn.primary {
 }
 button.primary:hover, .btn.primary:hover { background: var(--brand-down); }
 
+/* ---- 操作行：一组按钮横排 ----
+   默认左对齐（一列文字流里，操作跟着左边缘走最好扫）；要居中再加 .center。
+   窄窗放不下时 flex-wrap 折行，不横向溢出。
+   最后那条把竖向节奏压掉是必需的：`.card > * + *`（0,1,1）与
+   `.actions > * + *`（0,1,1）特异性相同，靠**写在它后面**取胜——不压掉的话
+   卡片里第二个按钮起会带 margin-top，在 flex 行里表现为按钮高低不齐。
+   所以这条规则的位置不能上移到垂直节奏那一节去。 */
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.actions.center { justify-content: center; }
+.actions > * + * { margin-top: 0; }
+
 /* ---- 输入框：裸 <input>/<textarea>/<select> 与 .input 同一副长相 ---- */
 input, textarea, select, .input {
   font: inherit; font-size: 13px; color: var(--text);
