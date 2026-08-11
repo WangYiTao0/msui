@@ -15,7 +15,7 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 两处版本号**：
 
 ```
-msui @ https://github.com/WangYiTao0/msui/releases/download/v0.6.0/msui-0.6.0-py3-none-any.whl
+msui @ https://github.com/WangYiTao0/msui/releases/download/v0.7.0/msui-0.7.0-py3-none-any.whl
 ```
 
 另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
@@ -39,8 +39,9 @@ pip install pytest
 三步：定位页面目录 → copy_assets 落共享样式 → run 开窗。
 页面要调 Python 时把 js_api 对象递给 run（方法包 Serializer：连点丢弃、
 不排队），页面那半边的写法见 pages/index.html 尾部的 <script>。
-`single_instance` 给了 id 就只开一扇窗：用户连点图标时第二个进程把已开的
-窗带到前台、自己静默退出（值用小程序自己的 id，全局唯一）。
+`single_instance` 必填——只开一扇窗是默认模式，值用小程序自己的 id（全局
+唯一）：用户连点图标时第二个进程把已开的窗带到前台、自己静默退出。真要
+多开得显式写 `single_instance=False`，漏传当场 TypeError。
 环境变量 APP_SMOKE=1 时隐藏开窗、SmokeDriver 自动驾驶一轮（等桥往返、
 核对样式真的生效、横幅钉住版本）后自关——给 CI/无人值守冒烟用；自己的仓
 不需要冒烟的话，把 make_smoke_script 和 driver 相关几行删掉即可。
@@ -59,7 +60,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.6.0"
+MSUI_PINNED = "0.7.0"
 
 
 class Api:
@@ -188,8 +189,21 @@ if __name__ == "__main__":
 
 ### 单实例：连点图标只开一扇窗
 
-`run(..., single_instance="<小程序 id>")` 一个参数接入（值用 `miniprog.toml`
-的 id，全局唯一现成）。**默认 `None` = 不限制**，不传的仓行为一个字不变。
+`run(..., single_instance="<小程序 id>")`——**这个参数必填**（值用
+`miniprog.toml` 的 id，全局唯一现成）。单实例是**默认模式**而不是可选装饰，
+所以口子收在 API 上：
+
+- **不传 → `TypeError`，窗压根开不了**。漏接入在编码期就炸，不留到用户连点
+  图标开出 N 个窗才发现；
+- **真要多开 → 显式写 `single_instance=False`**，守卫整段跳过。多开必须是
+  写下来的决定，这就是它跟「漏传」的区别；
+- **空串 / 纯空白 → `ValueError`**。空 id 会让 mutex 名退化成裸前缀
+  `Local\msui-`，两个不同的小程序共用同一把锁、互相顶掉窗口——比不设守卫更糟，
+  而且是静默的。
+
+一条陷阱：**同一个进程里第二次 `run()` 用同一个 id，会被自己第一次的锁挡住**。
+锁随进程活到死、没有释放函数（刻意的，见 `single_instance.py`）。测试里连开两扇
+窗要给不同 id，或者传 `False`。
 
 同 id 已有实例在跑时，第二个进程：
 
@@ -496,7 +510,7 @@ base.css
 ```text
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
-   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.6.0/msui-0.6.0-py3-none-any.whl
+   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.7.0/msui-0.7.0-py3-none-any.whl
    另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
    要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
@@ -531,7 +545,8 @@ base.css
     不挂 .actions 的按钮会竖着堆起来（卡片垂直节奏在起作用，不是缺样式）。
 12. 单实例：run(..., single_instance="<miniprog.toml 的 id>")，连点图标只开
     一扇窗——第二个进程把已开的窗带到前台，带不动就静默退出（绝不弹错误
-    框）。默认 None = 不限制。
+    框）。这个参数**必填**：不传 TypeError、空串 ValueError，真要多开显式写
+    single_instance=False。同进程内第二次 run 用同一 id 会被自己的锁挡住。
 13. 版式零决策：body 就是容器——边距、内容列宽、垂直节奏由 base.css 落在
     body 上，没有 .page 容器类；新页面从 msui README §3 的「标准单列页
     骨架」可抄块起步，不写任何版式 CSS，间距要自取时用 --space-1…6 档。

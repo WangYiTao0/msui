@@ -77,7 +77,7 @@ PAGE = "/somewhere/index.html"
 def test_run_defaults_create_window_geometry(monkeypatch):
     """不传时的默认几何：560×520、min_size (460, 360)（逻辑像素）。"""
     calls = _install_fake_webview(monkeypatch)
-    shell.run(PAGE)
+    shell.run(PAGE, single_instance=False)
 
     assert len(calls.create_window) == 1
     args, kwargs = calls.create_window[0]
@@ -90,7 +90,7 @@ def test_run_defaults_create_window_geometry(monkeypatch):
 def test_run_passes_custom_geometry_through(monkeypatch):
     """调用方给的宽/高/最小尺寸原样落到 create_window——这正是参数化的意义。"""
     calls = _install_fake_webview(monkeypatch)
-    shell.run(PAGE, width=800, height=600, min_size=(500, 400))
+    shell.run(PAGE, width=800, height=600, min_size=(500, 400), single_instance=False)
 
     _args, kwargs = calls.create_window[0]
     assert kwargs["width"] == 800
@@ -101,7 +101,7 @@ def test_run_passes_custom_geometry_through(monkeypatch):
 def test_run_default_title_is_a_neutral_placeholder(monkeypatch):
     """默认标题就是包名这种中性占位——共享运行时不带任何调用方的品牌。"""
     calls = _install_fake_webview(monkeypatch)
-    shell.run(PAGE)
+    shell.run(PAGE, single_instance=False)
 
     args, _kwargs = calls.create_window[0]
     assert args[0] == "msui"
@@ -109,7 +109,7 @@ def test_run_default_title_is_a_neutral_placeholder(monkeypatch):
 
 def test_run_passes_custom_title_through(monkeypatch):
     calls = _install_fake_webview(monkeypatch)
-    shell.run(PAGE, title="某个小程序")
+    shell.run(PAGE, title="某个小程序", single_instance=False)
 
     args, _kwargs = calls.create_window[0]
     assert args[0] == "某个小程序"
@@ -119,7 +119,7 @@ def test_run_accepts_a_path_url_and_passes_it_as_string(monkeypatch, tmp_path):
     """url 收 Path 也行，递给 create_window 时是字符串——pywebview 只认 str。"""
     calls = _install_fake_webview(monkeypatch)
     page = tmp_path / "index.html"
-    shell.run(page)
+    shell.run(page, single_instance=False)
 
     args, _kwargs = calls.create_window[0]
     assert args[1] == str(page)
@@ -130,7 +130,7 @@ def test_run_passes_the_js_api_object_as_is(monkeypatch):
     """js_api 是调用方组装好的对象本身，壳原封不动递给 create_window。"""
     calls = _install_fake_webview(monkeypatch)
     api = object()
-    shell.run(PAGE, js_api=api)
+    shell.run(PAGE, js_api=api, single_instance=False)
 
     _args, kwargs = calls.create_window[0]
     assert kwargs["js_api"] is api
@@ -138,7 +138,7 @@ def test_run_passes_the_js_api_object_as_is(monkeypatch):
 
 def test_run_without_js_api_passes_none(monkeypatch):
     calls = _install_fake_webview(monkeypatch)
-    shell.run(PAGE)
+    shell.run(PAGE, single_instance=False)
 
     _args, kwargs = calls.create_window[0]
     assert kwargs["js_api"] is None
@@ -155,7 +155,7 @@ def test_run_with_storage_dir_starts_with_private_mode_false(monkeypatch, tmp_pa
     pywebview 应用共享的目录。缺一个，「数据在版本更新后仍在」都不成立。"""
     calls = _install_fake_webview(monkeypatch)
     storage = tmp_path / "webview"
-    shell.run(PAGE, storage_dir=storage)
+    shell.run(PAGE, storage_dir=storage, single_instance=False)
 
     assert len(calls.start) == 1
     _args, kwargs = calls.start[0]
@@ -168,7 +168,7 @@ def test_run_without_storage_dir_leaves_storage_untouched(monkeypatch):
     """不传 storage_dir → 不递 private_mode / storage_path，全按 pywebview 默认走。
     共享运行时不许自己发明一个默认数据目录。"""
     calls = _install_fake_webview(monkeypatch)
-    shell.run(PAGE)
+    shell.run(PAGE, single_instance=False)
 
     _args, kwargs = calls.start[0]
     assert "storage_path" not in kwargs
@@ -182,7 +182,7 @@ def test_run_without_storage_dir_never_purges(monkeypatch):
     monkeypatch.setattr(
         shell, "purge_stale_webview_storage", lambda *a: purges.append(a) or True
     )
-    shell.run(PAGE, version="1.0.0")
+    shell.run(PAGE, version="1.0.0", single_instance=False)
 
     assert purges == []
 
@@ -196,7 +196,7 @@ def test_run_with_storage_dir_but_no_version_skips_purge(monkeypatch, tmp_path):
     leftover = storage / "cache-file"
     leftover.write_text("keep me", encoding="utf-8")
 
-    shell.run(PAGE, storage_dir=storage)
+    shell.run(PAGE, storage_dir=storage, single_instance=False)
 
     assert leftover.is_file()
     assert not (storage / "page-version.txt").exists()
@@ -214,7 +214,7 @@ def test_run_purges_with_the_injected_version(monkeypatch, tmp_path):
         return True
 
     monkeypatch.setattr(shell, "purge_stale_webview_storage", spy)
-    shell.run(PAGE, storage_dir=storage, version="7.8.9+local")
+    shell.run(PAGE, storage_dir=storage, version="7.8.9+local", single_instance=False)
 
     assert purges == [(storage, "7.8.9+local")]
 
@@ -242,7 +242,7 @@ def test_run_purges_stale_storage_before_creating_it(monkeypatch, tmp_path):
 
     monkeypatch.setattr(Path, "mkdir", spying_mkdir)
 
-    shell.run(PAGE, storage_dir=storage, version="1.0.0")
+    shell.run(PAGE, storage_dir=storage, version="1.0.0", single_instance=False)
 
     assert order[:2] == ["purge", "mkdir"]
 
@@ -357,7 +357,7 @@ def test_run_hooks_dark_chrome_onto_before_show(monkeypatch):
     painted = []
     monkeypatch.setattr(shell, "apply_dark_chrome", painted.append)
 
-    shell.run(PAGE)
+    shell.run(PAGE, single_instance=False)
 
     handlers = calls.window.events.before_show.handlers
     assert handlers, "run 没有往 before_show 上挂任何 handler"
@@ -376,7 +376,7 @@ def test_run_creates_a_visible_window_by_default(monkeypatch):
     pywebview 的默认也是 False，但那是它的默认，不是本壳的承诺；显式传死
     才挡得住哪天默认变了。"""
     calls = _install_fake_webview(monkeypatch)
-    shell.run(PAGE)
+    shell.run(PAGE, single_instance=False)
 
     _args, kwargs = calls.create_window[0]
     assert kwargs["hidden"] is False
@@ -385,7 +385,7 @@ def test_run_creates_a_visible_window_by_default(monkeypatch):
 def test_run_can_create_a_hidden_window(monkeypatch):
     """hidden=True 原样递给 create_window——窗口建起来、页面照常加载，只是不上屏。"""
     calls = _install_fake_webview(monkeypatch)
-    shell.run(PAGE, hidden=True)
+    shell.run(PAGE, hidden=True, single_instance=False)
 
     _args, kwargs = calls.create_window[0]
     assert kwargs["hidden"] is True
@@ -399,7 +399,7 @@ def test_run_can_create_a_hidden_window(monkeypatch):
 def test_run_creates_window_before_start(monkeypatch):
     """create_window 在前、start 在后——start 阻塞主循环，反过来窗口永远出不来。"""
     calls = _install_fake_webview(monkeypatch)
-    shell.run(PAGE)
+    shell.run(PAGE, single_instance=False)
     assert calls.order == ["create_window", "start"]
 
 
@@ -422,7 +422,7 @@ def test_before_start_runs_after_the_window_exists_but_before_the_loop(monkeypat
         calls.order.append("before_start")
         seen.append(window)
 
-    shell.run(PAGE, before_start=_before_start)
+    shell.run(PAGE, before_start=_before_start, single_instance=False)
 
     assert calls.order == ["create_window", "before_start", "start"]
     assert seen == [calls.window]
@@ -432,7 +432,7 @@ def test_run_works_without_before_start(monkeypatch):
     """不传就是纯开窗——调用方不该被迫关心这个缝。"""
     calls = _install_fake_webview(monkeypatch)
 
-    shell.run(PAGE)
+    shell.run(PAGE, single_instance=False)
 
     assert calls.order == ["create_window", "start"]
 
@@ -444,7 +444,7 @@ def test_run_passes_on_ready_hook_to_start(monkeypatch):
     def hook(window) -> None:  # pragma: no cover - 只比对身份，不会被调用
         pass
 
-    shell.run(PAGE, on_ready=hook)
+    shell.run(PAGE, on_ready=hook, single_instance=False)
 
     _args, kwargs = calls.start[0]
     assert kwargs["func"] is hook
@@ -463,7 +463,7 @@ def test_run_passes_the_window_icon_to_start(monkeypatch, tmp_path):
     calls = _install_fake_webview(monkeypatch)
     icon = tmp_path / "app.ico"
 
-    shell.run(PAGE, icon=icon)
+    shell.run(PAGE, icon=icon, single_instance=False)
 
     _args, kwargs = calls.start[0]
     assert kwargs["icon"] == str(icon)
@@ -474,14 +474,14 @@ def test_run_without_an_icon_does_not_invent_one(monkeypatch):
     提取」，那正是打包资源该承担的那份。"""
     calls = _install_fake_webview(monkeypatch)
 
-    shell.run(PAGE)
+    shell.run(PAGE, single_instance=False)
 
     _args, kwargs = calls.start[0]
     assert kwargs.get("icon") is None
 
 
 # ---------------------------------------------------------------------------
-# 单实例守卫：默认不限制；限制时第二实例连窗口都不建（票 12）
+# 单实例守卫：id 必填（票 13）；被拦时第二实例连窗口都不建（票 12）
 # ---------------------------------------------------------------------------
 
 
@@ -501,16 +501,55 @@ def _stub_guard(monkeypatch, *, allowed: bool):
     return seen
 
 
-def test_run_does_not_guard_by_default(monkeypatch):
-    """默认 `single_instance=None` = 不限制：守卫压根不被调用，现有消费者
-    （以及同时开两份的用法）行为一个字都不变。"""
+def test_run_without_single_instance_refuses_to_open_a_window(monkeypatch):
+    """**不报上 id 就开不了窗**：`single_instance` 是必填关键字参数。
+
+    单例是默认模式、不是可选装饰——漏接入必须在编码期当场炸，而不是等到用户
+    连点图标开出 N 个窗才发现（官方样板 Tool_Counter 就这么漏了整整一版）。
+    TypeError 由 Python 的签名检查抛出：连函数体都进不去，自然也不会建窗。
+    """
+    calls = _install_fake_webview(monkeypatch)
+
+    with pytest.raises(TypeError):
+        shell.run(PAGE)  # type: ignore[call-arg]
+
+    assert calls.order == []
+
+
+def test_run_with_single_instance_false_skips_the_guard(monkeypatch):
+    """`False` 是**显式**多开的逃生口：守卫整段跳过，照常建窗。
+
+    保留这个口子是给极少数真需要多开的场景（以及本文件里那些测别的维度的
+    用例）。它与「漏传」的区别正是这条规矩的全部意义：多开必须是写下来的决定。
+    """
     calls = _install_fake_webview(monkeypatch)
     seen = _stub_guard(monkeypatch, allowed=True)
 
-    shell.run(PAGE)
+    shell.run(PAGE, single_instance=False)
 
     assert seen.acquire == []
     assert calls.order == ["create_window", "start"]
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t\n"])
+def test_run_rejects_a_blank_id_before_doing_anything(monkeypatch, tmp_path, blank):
+    """空串 / 纯空白 id 当场 ValueError，且**什么都还没做**。
+
+    为什么不当成「没传」放行：空 id 会让 mutex 名退化成裸前缀 `Local\\msui-`，
+    于是**两个不同的小程序共用同一把锁**——先开的那个会把后开的那个顶掉，用户
+    看到的是「点了 B，前台弹出来的是 A」。这比压根不设守卫更糟，而且是静默的。
+
+    「什么都还没做」有两条可判据：没建窗（create_window 没被调），也没碰
+    storage（purge 没跑、目录没建）——校验必须在装配之前，不能等窗都建好了才炸。
+    """
+    calls = _install_fake_webview(monkeypatch)
+    storage = tmp_path / "webview"
+
+    with pytest.raises(ValueError):
+        shell.run(PAGE, single_instance=blank, storage_dir=storage, version="1.0.0")
+
+    assert calls.order == []
+    assert not storage.exists()
 
 
 def test_run_with_single_instance_acquires_that_id(monkeypatch):

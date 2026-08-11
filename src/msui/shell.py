@@ -21,6 +21,7 @@ import logging
 import shutil
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 # 起个别名：`single_instance` 这个名字留给 run() 的同名参数（票 12 定的 API
 # 形态），模块本体在函数体里按 `guard.` 访问，不被参数遮蔽。
@@ -92,7 +93,7 @@ def run(
     storage_dir: str | Path | None = None,
     version: str | None = None,
     hidden: bool = False,
-    single_instance: str | None = None,
+    single_instance: str | Literal[False],
     before_start: Callable[..., object] | None = None,
     on_ready: Callable[..., object] | None = None,
 ) -> None:
@@ -140,16 +141,35 @@ def run(
     `on_ready(window)`：窗口起来后在 pywebview 的后台线程里被调用的钩子，
     给自动驾驶/无头驱动用；不传就是纯开窗。
 
-    `single_instance`：给了就开单实例守卫，值是这个小程序的 id（用
-    miniprog.toml 的 id，全局唯一现成）。同 id 已有实例在跑时，本次调用
-    **什么都不做直接返回**——不建窗、不碰 storage、连 pywebview 都不 import；
-    先尽力把已开的那扇窗按 `title` 带到前台，带不动就静默退出（日志一行，
-    绝不弹错误框：用户的语义是「我想打开它」）。默认 None = 不限制，现有
-    消费者行为一个字不变。机制与降级纪律见 :mod:`msui.single_instance`。
+    `single_instance`：**必填**，没有默认值——不报上 id 就开不了窗。单实例是
+    默认模式而不是可选装饰，所以漏接入在编码期就 TypeError，不留到用户连点
+    图标开出 N 个窗才发现。
+
+      - **id 字符串**：开守卫。值用 miniprog.toml 的 id（全局唯一现成）。
+        同 id 已有实例在跑时，本次调用**什么都不做直接返回**——不建窗、不碰
+        storage、连 pywebview 都不 import；先尽力把已开的那扇窗按 `title` 带到
+        前台，带不动就静默退出（日志一行，绝不弹错误框：用户的语义是「我想
+        打开它」）。机制与降级纪律见 :mod:`msui.single_instance`。
+      - **`False`**：显式放弃单例，守卫整段跳过。给极少数真需要多开的场景。
+        它与「漏传」的区别就是这条规矩的意义所在：多开必须是写下来的决定。
+      - **空串 / 纯空白**：`ValueError`，在装配任何东西之前。空 id 会让 mutex
+        名退化成裸前缀 `Local\\msui-`，两个不同的小程序于是共用同一把锁、互相
+        顶掉窗口——比不设守卫更糟，且是静默的。
+
+    **同一个进程里第二次 `run()` 用同一个 id 会被自己第一次的锁挡住**：锁挂在
+    :mod:`msui.single_instance` 的模块级 `_held` 上、随进程活到死，没有释放
+    函数（刻意的——mutex 与 flock 都随进程消亡自动释放，不写清理代码）。测试
+    里连开两扇窗要给不同 id，或者干脆传 `False`。
     """
+    if single_instance is not False and not single_instance.strip():
+        # 校验放在最前面：晚一步就会先把 storage 推倒重建，然后才炸。
+        raise ValueError(
+            "single_instance 不能是空串或纯空白：空 id 会让不同小程序共用同一把锁。"
+            " 传本小程序的 id（miniprog.toml 的 id），或显式传 False 放弃单例。"
+        )
     # 守卫判在最前面：晚于 purge 的话，第二实例会把**第一实例正开着的窗**的
     # webview 缓存整个推倒重建（有测试钉着顺序）。
-    if single_instance is not None and not guard.acquire(single_instance):
+    if single_instance is not False and not guard.acquire(single_instance):
         try:
             raised = guard.raise_existing_window(title)
         except Exception:  # noqa: BLE001 - 带前台是尽力而为，炸了也只是静默退出

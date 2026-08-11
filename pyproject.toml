@@ -3,7 +3,7 @@ name = "msui"
 # 版本号**只写这里一处**（tests/test_version.py 盯着这个单一来源）。
 # 发布：git tag v<这个号> && git push origin v<这个号>，
 # CI 在装依赖之前核对 tag 与这里一致，不一致当场 fail（scripts/check_tag_version.py）。
-version = "0.6.0"
+version = "0.7.0"
 description = "小程序共享 UI 运行时与样式（pywebview + WebView2）——骨架先行，功能后续迁入"
 readme = "README.md"
 # 本包要被同一批小程序装，下限与它们的运行环境对齐（3.11 起有 tomllib）。
