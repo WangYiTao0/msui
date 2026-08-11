@@ -27,6 +27,12 @@ from msui import single_instance
 # ---------------------------------------------------------------------------
 # 真锁语义：POSIX 侧 flock，不注入替身
 # ---------------------------------------------------------------------------
+#
+# 整节 POSIX only：Windows 上没有 fcntl，`_acquire_posix` 会 ImportError 走
+# acquire 的「降级放行」分支，这几条断言会读出 True——那是纪律生效，不是
+# 锁坏了。Windows 侧的真锁语义由下面那节的命名 mutex 负责。
+
+posix_only = pytest.mark.skipif(os.name != "posix", reason="flock 锁文件是 POSIX 侧实现")
 
 
 def _real_posix_acquire(tmp_path):
@@ -34,11 +40,13 @@ def _real_posix_acquire(tmp_path):
     return lambda app_id: single_instance._acquire_posix(tmp_path / f"{app_id}.lock")
 
 
+@posix_only
 def test_first_instance_acquires_the_lock(tmp_path):
     """头一个实例拿得到锁 → True = 「可以开窗」。"""
     assert single_instance.acquire("solo-a", acquire_lock=_real_posix_acquire(tmp_path))
 
 
+@posix_only
 def test_second_acquire_of_the_same_id_fails(tmp_path):
     """同 id 再拿一次就拿不到——这正是「第二实例不开新窗」的判据。
 
@@ -52,6 +60,7 @@ def test_second_acquire_of_the_same_id_fails(tmp_path):
     assert single_instance.acquire("solo-b", acquire_lock=acquire_lock) is False
 
 
+@posix_only
 def test_different_ids_do_not_collide(tmp_path):
     """锁按 app_id 分——计数器开着不该挡住另一个小程序。"""
     acquire_lock = _real_posix_acquire(tmp_path)
@@ -119,6 +128,25 @@ def test_lock_dies_with_the_holder_process(tmp_path):
     assert after.stdout is not None
     assert after.stdout.readline().strip() == "GOT"
     after.wait(timeout=10)
+
+
+# ---------------------------------------------------------------------------
+# 真锁语义：Windows 侧命名 mutex，不注入替身（只在 Windows CI 上跑得到）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="命名 mutex 只有 Windows 有")
+def test_named_mutex_blocks_the_second_acquire():
+    """同 id 第二次 CreateMutexW 拿 ERROR_ALREADY_EXISTS → False。
+
+    与 POSIX 那节的 `test_second_acquire_of_the_same_id_fails` 是同一条语义在
+    另一个平台上的实现——两边都真跑，「行为对齐」才不是一句口号。id 掺 pid
+    避免与同机上别的 runner/进程撞名（mutex 名是整个登录会话共享的）。
+    """
+    app_id = f"solo-win-{os.getpid()}"
+
+    assert single_instance.acquire(app_id) is True
+    assert single_instance.acquire(app_id) is False
 
 
 # ---------------------------------------------------------------------------
