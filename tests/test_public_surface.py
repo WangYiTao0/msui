@@ -28,7 +28,7 @@ FORBIDDEN_PATTERNS = (
 )
 
 # 内部私仓名：只允许 README 的 spec 指针那一行出现。
-INTERNAL_REPO = "MSToolbox"
+INTERNAL_REPO = "MSLaunchpad"
 
 
 def _tracked_text_files() -> list[Path]:

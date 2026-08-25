@@ -3,7 +3,7 @@
 小程序共享 UI 运行时与样式（pywebview + WebView2）：WebView2 检测引导、一行开窗、
 共享 tokens/base 样式与样式闸门、js_api 桥通用件、自带 PyInstaller hook。
 
-设计与切票见 spec：[WangYiTao0/MSToolbox#107](https://github.com/WangYiTao0/MSToolbox/issues/107)。
+设计与切票见 spec：[WangYiTao0/MSLaunchpad#107](https://github.com/WangYiTao0/MSLaunchpad/issues/107)。
 
 本 README 就是消费者契约：下面五件事按顺序做，一个新的小程序仓从零到跑起来。
 所有代码块与 `examples/minimal/` 里的完整示例一字一致（有测试盯着不许漂移），
