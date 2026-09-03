@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -29,9 +30,15 @@ from msui import single_instance as guard
 from msui.chrome import apply_dark_chrome
 
 __all__ = [
+    "HEADLESS_SIGNAL_ENV",
+    "HeadlessWindowRefused",
     "purge_stale_webview_storage",
     "run",
 ]
+
+#: 宿主的定时路径交下来的无头信号。名字是接入契约定死的**字面量**，写在这里而
+#: 不是 import 宿主的常量：本包不依赖任何宿主的代码，只依赖那份契约上的字面约定。
+HEADLESS_SIGNAL_ENV = "MSLAUNCHPAD_SCHEDULED"
 
 # 日志走 "msui.shell"：挂本包自己的名字空间，宿主应用配自己的日志树时经
 # propagate 决定收不收，本包不往任何宿主的树里挂。
@@ -79,6 +86,37 @@ def purge_stale_webview_storage(storage: Path, version: str) -> bool:
 
     _log.info("webview 缓存已随版本更换清理")
     return True
+
+
+class HeadlessWindowRefused(RuntimeError):
+    """在无头信号下调了 :func:`run`。**这是调用方自己的实现错误**，不是环境问题。
+
+    收到无头信号意味着此刻没有人在看屏幕：宿主在定时路径上背着用户把这个应用
+    拉起来，等一个退出码。接入契约要求这一趟**不弹任何窗口**，所以正确的写法是
+    在 ``main()`` 最前面分出一条无头分支，跑完业务就退，根本不调 :func:`run`。
+
+    不拦的话，写错的后果是**静默**的，而且是最坏的那一种：窗口弹在没人看的桌面
+    上；更糟的是撞上单实例守卫——用户手动开着这个应用时它抢不到锁，于是把那扇窗
+    带到前台然后 `return`，函数**正常返回**、进程**退出码是 0**，宿主据此记一条
+    「成功」，而这一趟什么都没做。从运行记录上看不出任何异常。
+
+    抛异常而不是自己 `sys.exit`：退出码该由调用方的顶层 try/except 决定（契约给的
+    形状示例就是那样），库不替调用方决定进程怎么结束。
+    """
+
+
+def _refuse_when_headless() -> None:
+    """无头信号在 → 拒绝开窗（见 :class:`HeadlessWindowRefused`）。
+
+    判的是 ``== "1"``：契约写死了这个值。宽松地「非空即真」会把 ``"0"`` 也当成
+    无头，那样用户手动点开反而打不开——比它要防的问题更糟。
+    """
+    if os.environ.get(HEADLESS_SIGNAL_ENV, "").strip() == "1":
+        raise HeadlessWindowRefused(
+            f"{HEADLESS_SIGNAL_ENV}=1（宿主的定时路径）下不能开窗口：此刻没有人在"
+            "看屏幕。请在 main() 最前面分出无头分支，跑完业务就退，不要调"
+            " msui.shell.run —— 形状见接入契约的无头义务一节。"
+        )
 
 
 def run(
@@ -167,6 +205,7 @@ def run(
             "single_instance 不能是空串或纯空白：空 id 会让不同小程序共用同一把锁。"
             " 传本小程序的 id（miniprog.toml 的 id），或显式传 False 放弃单例。"
         )
+    _refuse_when_headless()
     # 守卫判在最前面：晚于 purge 的话，第二实例会把**第一实例正开着的窗**的
     # webview 缓存整个推倒重建（有测试钉着顺序）。
     if single_instance is not False and not guard.acquire(single_instance):

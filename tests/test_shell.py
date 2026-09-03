@@ -673,3 +673,91 @@ def test_shell_imports_only_stdlib_msui_and_webview():
     allowed = set(sys.stdlib_module_names) | {"msui", "webview", "__future__"}
     offenders = roots - allowed
     assert not offenders, f"shell.py import 了宿主/第三方包：{sorted(offenders)}"
+
+
+# ---------------------------------------------------------------------------
+# 无头信号下拒绝开窗
+# ---------------------------------------------------------------------------
+
+
+def test_run_refuses_to_open_a_window_under_the_headless_signal(monkeypatch, tmp_path):
+    """无头信号在 → 抛 `HeadlessWindowRefused`，**一个窗口都不建**。
+
+    收到这个信号意味着没人在看屏幕。调用方本该在 main() 最前面分出无头分支、
+    根本不走到这里；走到了就是实现错误，而这个错误不拦住的话是**静默**的：
+    最坏的一支是撞上单实例守卫——它把已有窗口带到前台然后正常返回，进程退出码
+    是 0，宿主据此记「成功」，而这一趟什么都没做。
+    """
+    monkeypatch.setenv(shell.HEADLESS_SIGNAL_ENV, "1")
+    monkeypatch.setattr(shell, "guard", _GuardSpy())
+
+    with pytest.raises(shell.HeadlessWindowRefused) as excinfo:
+        shell.run(tmp_path / "index.html", single_instance="demo")
+
+    assert "无头" in str(excinfo.value) or "没有人在" in str(excinfo.value)
+
+
+def test_the_refusal_happens_before_the_single_instance_guard(monkeypatch, tmp_path):
+    """拒绝要发生在**抢锁之前**。
+
+    顺序要紧：守卫一旦抢到锁，锁就挂在模块级、随进程活到死；无头那一趟白占一把
+    本该留给用户手动那个实例的锁。而抢不到锁的那一支更糟——它会去把别人的窗带到
+    前台，正是这条要防的事。
+    """
+    spy = _GuardSpy()
+    monkeypatch.setenv(shell.HEADLESS_SIGNAL_ENV, "1")
+    monkeypatch.setattr(shell, "guard", spy)
+
+    with pytest.raises(shell.HeadlessWindowRefused):
+        shell.run(tmp_path / "index.html", single_instance="demo")
+
+    assert spy.acquired == [], "无头那一趟不该碰单实例锁"
+    assert spy.raised == [], "更不该去动别人的窗口"
+
+
+def test_the_empty_id_check_still_comes_first(monkeypatch, tmp_path):
+    """空 id 仍然先炸 ValueError —— 那是编码错误，比环境的事更早该被发现。"""
+    monkeypatch.setenv(shell.HEADLESS_SIGNAL_ENV, "1")
+    monkeypatch.setattr(shell, "guard", _GuardSpy())
+
+    with pytest.raises(ValueError):
+        shell.run(tmp_path / "index.html", single_instance="   ")
+
+
+@pytest.mark.parametrize("value", ["", "0", "false", "no", " "])
+def test_anything_other_than_one_is_not_the_headless_signal(monkeypatch, tmp_path, value):
+    """只有 `"1"` 算数：契约写死了这个值。
+
+    宽松地「非空即真」会把 `"0"` 也当成无头 —— 那样用户手动点开反而打不开，
+    比它要防的问题更糟。这里只验「没被拒绝」，不真开窗（守卫替身让它早早返回）。
+    """
+    monkeypatch.setenv(shell.HEADLESS_SIGNAL_ENV, value)
+    monkeypatch.setattr(shell, "guard", _GuardSpy())
+
+    shell.run(tmp_path / "index.html", single_instance="demo")  # 不抛就算过
+
+
+class _GuardSpy:
+    """单实例守卫的替身：记下被调了什么。
+
+    **`acquire` 默认答「已有实例在跑」（False）**，这是刻意的：防线一旦失效，
+    `run` 会继续往下走到 `import webview` 真去开窗，在无人值守环境里那不是「红」
+    而是**挂住**——CI 上只看到一次超时，看不出是什么坏了。答 False 让那条路早早
+    返回，于是防线失效时测试红在「该抛异常却没抛」上，而不是卡死。
+
+    （第一版默认答 True，做 mutation 自证时当场把自己挂了五分钟，还因为 SIGTERM
+    跳过 finally 把变异留在了工作区里。）
+    """
+
+    def __init__(self, *, acquire_result: bool = False) -> None:
+        self.acquired: list[str] = []
+        self.raised: list[str] = []
+        self._result = acquire_result
+
+    def acquire(self, app_id: str) -> bool:
+        self.acquired.append(app_id)
+        return self._result
+
+    def raise_existing_window(self, title: str) -> bool:
+        self.raised.append(title)
+        return True
