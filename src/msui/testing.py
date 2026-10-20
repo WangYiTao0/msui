@@ -7,14 +7,13 @@
 测试盯着才立得住。本模块把「盯着」所需的全部零件做成可复用的纯函数，消费
 者在自己仓里用三五行 pytest 把闸门接上：
 
-    from msui.resources import parse_tokens, tokens_css_path
     from msui import testing as gate
 
-    tokens = parse_tokens(tokens_css_path().read_text(encoding="utf-8"))
-    override = parse_tokens(Path("static/override.css").read_text(encoding="utf-8"))
-    colors = gate.hex_tokens(gate.merge_tokens(tokens, override))
+    override = Path("static/override.css").read_text(encoding="utf-8")
 
-    def test_readable():
+    @pytest.mark.parametrize("theme", gate.THEMES)   # 深色、浅色各一遍
+    def test_readable(theme):
+        colors = gate.theme_colors(theme, override)
         failures = gate.contrast_failures(colors, gate.BASE_TOKEN_PAIRS + MY_PAIRS)
         assert not failures, gate.format_contrast_failures(failures, colors)
 
@@ -28,6 +27,8 @@
      不用抄公式；
   2. `merge_tokens` 把包内 tokens 与消费者 override **合成一份字典**——
      对比度检查吃的是合成后的结果，override 改了什么、闸门就看见什么；
+     `theme_colors(theme, override_css)` 按浏览器层叠把深色 / 浅色各合成
+     一份，消费者自己的登记项两个主题都过；
   3. `TokenPair` + `BASE_TOKEN_PAIRS`：基础登记表覆盖包内 `base.css` 实际
      用到的前景/背景组合；消费者用 `BASE_TOKEN_PAIRS + (自己的登记项,)`
      追加自己页面的组合；
@@ -54,10 +55,11 @@ from typing import Any
 
 from .resources import (
     ASSET_NAMES,
-    BASE_CSS_NAME,
-    TOKENS_CSS_NAME,
     TOKENS_LIGHT_CSS_NAME,
+    asset_path,
     base_css_path,
+    parse_tokens,
+    tokens_css_path,
 )
 
 __all__ = [
@@ -74,6 +76,7 @@ __all__ = [
     "SEPARATOR_MINIMUM",
     "SmokeDriver",
     "TEXT_MINIMUM",
+    "THEMES",
     "TokenPair",
     "contrast_failures",
     "contrast_ratio",
@@ -86,6 +89,7 @@ __all__ = [
     "relative_luminance",
     "scan_base_redefinitions",
     "scan_stray_hex",
+    "theme_colors",
 ]
 
 # ---------------------------------------------------------------------------
@@ -215,6 +219,71 @@ def hex_tokens(
             )
         result[name] = value
     return result
+
+
+# ---------------------------------------------------------------------------
+# 按主题合成：深色 / 浅色各算一份（消费者的 MY_PAIRS 两个主题都要过）
+# ---------------------------------------------------------------------------
+
+# 闸门要跑的主题。深色是默认；浅色 = tokens-light.css 的
+# `:root[data-theme="light"]` 覆写，页面打开开关才生效。
+THEMES: tuple[str, ...] = ("dark", "light")
+
+_LIGHT_THEME_SELECTOR = ':root[data-theme="light"]'
+
+_BLOCK_RE = re.compile(r"([^{}]+)\{([^{}]*)\}")
+
+
+def _split_override(override_css: str) -> tuple[str, str]:
+    """把 override 文本按规则块拆成（`:root` 层生效的块, 浅色层生效的块）。
+
+    选择器列表里有 `:root[data-theme="light"]` 的块进第二份；有别的选择器
+    （`:root` 本身）的块进第一份。两个主题都要换色时写的
+    `:root, :root[data-theme="light"] { … }` 两份都进。
+    """
+    light_key = _normalize_selector(_LIGHT_THEME_SELECTOR)
+    plain: list[str] = []
+    light: list[str] = []
+    for head, block in _BLOCK_RE.findall(_CSS_COMMENT_RE.sub("", override_css)):
+        selectors = {_normalize_selector(part) for part in head.split(",") if part.strip()}
+        if light_key in selectors:
+            light.append(block)
+        if selectors - {light_key}:
+            plain.append(block)
+    return "\n".join(plain), "\n".join(light)
+
+
+def theme_colors(
+    theme: str,
+    override_css: str | None = None,
+    *,
+    non_hex: Collection[str] = NON_HEX_TOKENS,
+) -> dict[str, str]:
+    """某个主题下页面**实际生效**的纯色 token，直接喂给 `contrast_failures`。
+
+    `theme` 取 `THEMES` 之一；`override_css` 是消费者 override.css 的文本（没有
+    就传 None）。合成顺序照浏览器层叠来——tokens.css 的 `:root` 与
+    override.css 的 `:root` 同特异性、后加载者胜；tokens-light.css 的
+    `:root[data-theme="light"]` 更具体，浅色下压过 override 里只写在 `:root` 的
+    同名变量（README §4 讲过的那条坑），override 里同样挂了浅色选择器的块
+    再压回来：
+
+    - dark：tokens.css → override 里挂在 `:root` 上的块；
+    - light：tokens.css → override 里挂在 `:root` 上的块 → tokens-light.css →
+      override 里挂在 `:root[data-theme="light"]` 上的块。
+
+    这样浅色下闸门算的就是浅色下真正画出来的颜色：override 换了品牌色却忘了
+    给浅色也写一份，红的是浅色那一遍，而不是被一个不生效的值糊成假绿。
+    """
+    if theme not in THEMES:
+        raise ValueError(f"未知主题 {theme!r}，只认 {THEMES}")
+    tokens = parse_tokens(tokens_css_path().read_text(encoding="utf-8"))
+    plain_css, light_css = _split_override(override_css or "")
+    merged = merge_tokens(tokens, parse_tokens(plain_css))
+    if theme == "light":
+        light = parse_tokens(asset_path(TOKENS_LIGHT_CSS_NAME).read_text(encoding="utf-8"))
+        merged = merge_tokens(merge_tokens(merged, light), parse_tokens(light_css))
+    return hex_tokens(merged, non_hex=non_hex)
 
 
 # ---------------------------------------------------------------------------
@@ -373,15 +442,11 @@ SCANNED_SUFFIXES = (".html", ".css", ".js")
 
 OVERRIDE_CSS_NAME = "override.css"
 
-# 默认允许含 hex 的文件名：包内三份 css 的**副本**（copy_assets 落进消费者
-# 页面目录的那三份——原件的干净由包自己的测试把关，消费者不必重复负责），
-# 加上消费者自己的换色 override.css（它的本职就是用新 hex 覆写 token 值）。
-ALLOWED_HEX_FILE_NAMES: tuple[str, ...] = (
-    TOKENS_CSS_NAME,
-    TOKENS_LIGHT_CSS_NAME,
-    BASE_CSS_NAME,
-    OVERRIDE_CSS_NAME,
-)
+# 默认允许含 hex 的文件名：包内落地资产的**副本**（copy_assets 落进消费者
+# 页面目录的那几份，即 ASSET_NAMES——由它派生，新增落地资产不必在这里散改；
+# 原件的干净由包自己的测试把关，消费者不必重复负责），加上消费者自己的换色
+# override.css（它的本职就是用新 hex 覆写 token 值）。
+ALLOWED_HEX_FILE_NAMES: tuple[str, ...] = (*ASSET_NAMES, OVERRIDE_CSS_NAME)
 
 
 def scan_stray_hex(
@@ -443,19 +508,22 @@ def _normalize_selector(selector: str) -> str:
     return selector.replace('"', "").replace("'", "")
 
 
-def _css_selectors(css: str) -> list[str]:
-    """每一条规则的每一个选择器（逗号拆开、已归一），含 @media 里嵌着的。
+def _css_selectors(css: str, *, normalize: bool = True) -> list[str]:
+    """每一条规则的每一个选择器（逗号拆开），含 @media 里嵌着的。
 
     先剥注释（注释里常逐字写着选择器）；@keyframes 里的 from / to / 百分比
     不是选择器，整段剔掉；@ 开头的规则头（@media 本身、@font-face）不算。
+    `normalize=True`（默认）把空白、组合符两侧空格、属性值引号归一，供重定义
+    比对用；`False` 只去首尾空白、保留源码写法（包自己的版式测试按原文断言）。
     """
     body = _KEYFRAMES_RE.sub("", _CSS_COMMENT_RE.sub("", css))
+    clean = _normalize_selector if normalize else str.strip
     found: list[str] = []
     for head in _RULE_HEAD_RE.findall(body):
         head = head.strip()
         if head.startswith("@"):
             continue
-        found.extend(_normalize_selector(part) for part in head.split(",") if part.strip())
+        found.extend(clean(part) for part in head.split(",") if part.strip())
     return found
 
 

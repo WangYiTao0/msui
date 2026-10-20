@@ -1093,9 +1093,10 @@ msui 自带一套官方浅色：`tokens-light.css`，`copy_assets` 每次启动�
   `:root[data-theme="light"]` 比 `:root` 更具体，浅色下会把 override 的品牌色
   压回红色。两个主题都要换色就写 `:root, :root[data-theme="light"] { --brand: …; }`；
 - 浅色的配色过的是同一张 `BASE_TOKEN_PAIRS`、同一套档位（msui 自己的 CI 把过
-  关）；页面追加了自己的 `MY_PAIRS` 时，闸门也要对浅色再跑一遍：把
-  `asset_path(TOKENS_LIGHT_CSS_NAME)` 解析出来，用 `gate.merge_tokens` 合到深色
-  tokens 上（有 override 再合 override），同一张表过一遍；
+  关）；页面自己的 `MY_PAIRS` 与 override 也要在浅色下过一遍——§5 的闸门已经
+  按 `gate.THEMES` 深色、浅色各跑一遍：`gate.theme_colors(theme, override)`
+  按页面实际的层叠合成（浅色下只写在 `:root` 的 override 会被浅色值压掉，闸门
+  算的也是被压掉之后的颜色）；
 - 已知限制：Windows 原生标题栏开窗时染成深色的 `--win`，页面切浅色时它不跟着变。
 
 ### 自己的版式：layout.css（默认不用）
@@ -1136,8 +1137,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from msui import testing as gate
-from msui.resources import parse_tokens, tokens_css_path
 
 PAGES = Path(__file__).resolve().parent.parent / "pages"
 OVERRIDE = PAGES / gate.OVERRIDE_CSS_NAME  # 默认不存在；要换色时才加
@@ -1147,17 +1149,11 @@ OVERRIDE = PAGES / gate.OVERRIDE_CSS_NAME  # 默认不存在；要换色时才�
 MY_PAIRS: tuple[gate.TokenPair, ...] = ()
 
 
-def _colors() -> dict[str, str]:
-    tokens = parse_tokens(tokens_css_path().read_text(encoding="utf-8"))
-    if OVERRIDE.is_file():
-        tokens = gate.merge_tokens(
-            tokens, parse_tokens(OVERRIDE.read_text(encoding="utf-8"))
-        )
-    return gate.hex_tokens(tokens)
-
-
-def test_contrast_gate():
-    colors = _colors()
+@pytest.mark.parametrize("theme", gate.THEMES)
+def test_contrast_gate(theme):
+    # 深色、浅色各算一遍（浅色 = tokens-light.css 覆写，按页面实际层叠合 override）
+    override = OVERRIDE.read_text(encoding="utf-8") if OVERRIDE.is_file() else None
+    colors = gate.theme_colors(theme, override)
     failures = gate.contrast_failures(colors, gate.BASE_TOKEN_PAIRS + MY_PAIRS)
     assert not failures, gate.format_contrast_failures(failures, colors)
 
@@ -1304,6 +1300,28 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
 宿主平台客户端列表里的图标是另一回事（接入契约 §3 的 `icon` 目前是死字段，
 等那侧功能定型），本节只管 exe 自己的图标。
 
+## 从 0.9.x 及更早升到 0.10.0
+
+0.10.0 起 `copy_assets` 每次启动多落一份 `tokens-light.css`（可选的浅色主题，
+见 §4）。照旧版 README 抄过去的几处只认 `tokens.css` / `base.css`，升钉版本时
+跟着一起改：
+
+1. **`pages/.gitignore`** 补一行 `tokens-light.css`（三行写法见上文「打包」一节
+   末尾）——不补的话落地副本以未跟踪文件出现，一次整目录 add 就进了仓；
+2. **PyInstaller `.spec` 的副本过滤**（样板里的 `_is_landed_css`）文件名元组补上
+   `"tokens-light.css"`——不补只是产物里多一份永远用不到的副本，但与样板对不上；
+3. **拿 `msui.resources.ASSET_NAMES` 对账 `.gitignore` / `.spec` 的测试**：升级后
+   `ASSET_NAMES` 多了一项，这条会红——按上两条补齐让它转绿，别把测试里的期望
+   改回写死的两份；
+4. **闸门测试补成三条**：照新版 §5 的 `test_style_gate.py` 整份覆盖（`MY_PAIRS`
+   留自己的）——对比度改为深色、浅色各一遍（`gate.theme_colors`），并新增
+   `test_own_css_never_redefines_base_selectors`（`scan_base_redefinitions`）；
+5. 给 `scan_stray_hex` 显式传过 `allowed_names=` 的，同样补上 `tokens-light.css`
+   （用默认的 `ALLOWED_HEX_FILE_NAMES` 就不用管，它由 `ASSET_NAMES` 派生）。
+
+页面长相上，小工具窗默认形态不变；对所有页面自动生效的只有两条修正：
+`dialog[open]` 在窗内居中，品牌色上的文字走 `--on-brand`（深色下值与原来相同）。
+
 ## 给 AI 的转述块
 
 给一个要新建/改造小程序仓的 AI 当引导词，整段粘贴即可：
@@ -1329,7 +1347,7 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
    <link> tokens-light.css，再给 <html> 设 data-theme="light"；品牌色底上的
    文字用 var(--on-brand)，不用 var(--text)。
 6. 测试加三条样式闸门（照抄 msui README 的 test_style_gate.py）：
-   contrast_failures 对比度 + scan_stray_hex 防游离色值 +
+   contrast_failures 对比度（theme_colors 深色、浅色各一遍）+ scan_stray_hex 防游离色值 +
    scan_base_redefinitions 不重定义 base.css 已有选择器。
 7. PyInstaller spec 里对 msui 零资源配置（包自带 hook 收齐样式与元数据），
    datas 只写自己的 ("pages", "pages")。

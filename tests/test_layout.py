@@ -15,7 +15,7 @@ import re
 import pytest
 
 from msui.resources import base_css_path, parse_tokens, tokens_css_path
-from msui.testing import NON_HEX_TOKENS
+from msui.testing import NON_HEX_TOKENS, _css_selectors
 
 BASE = base_css_path().read_text(encoding="utf-8")
 TOKENS = parse_tokens(tokens_css_path().read_text(encoding="utf-8"))
@@ -660,20 +660,11 @@ APP_ONLY_CLASSES = ("app", "cols", "rail", "pane", "top", "status")
 
 
 def all_selectors(css: str = BASE) -> list[str]:
-    """CSS 里每一条规则的每一个选择器（逗号拆开），含 @media 里嵌着的。
-
-    先剥注释（注释里逐字写着选择器）；@keyframes 里的 from / to / 百分比
-    不是选择器，整段剔掉。
+    """CSS 里每一条规则的每一个选择器（逗号拆开、保留源码写法），含 @media 里
+    嵌着的。解析逻辑只有一套：复用 msui.testing 给重定义闸门用的那份，这里
+    只是不做归一（下面的断言按源码原文比对，如 "body > * + *"）。
     """
-    body = CSS_COMMENT_RE.sub("", css)
-    body = re.sub(r"@keyframes[^{]*\{(?:[^{}]*\{[^}]*\})*\s*\}", "", body)
-    found: list[str] = []
-    for head in re.findall(r"([^{};]+)\{[^{}]*\}", body):
-        head = head.strip()
-        if head.startswith("@"):
-            continue
-        found.extend(part.strip() for part in head.split(","))
-    return found
+    return _css_selectors(css, normalize=False)
 
 
 def is_app_scoped(selector: str) -> bool:

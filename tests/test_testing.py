@@ -18,6 +18,7 @@ import pytest
 
 from msui import testing as msui_testing
 from msui.resources import (
+    ASSET_NAMES,
     BASE_CSS_NAME,
     TOKENS_CSS_NAME,
     TOKENS_LIGHT_CSS_NAME,
@@ -35,6 +36,7 @@ from msui.testing import (
     NON_HEX_TOKENS,
     SEPARATOR_MINIMUM,
     TEXT_MINIMUM,
+    THEMES,
     TokenPair,
     contrast_failures,
     contrast_ratio,
@@ -44,6 +46,7 @@ from msui.testing import (
     merge_tokens,
     relative_luminance,
     scan_stray_hex,
+    theme_colors,
 )
 
 
@@ -335,6 +338,59 @@ def test_text_on_brand_stays_light_in_the_light_theme(light_colors: dict[str, st
 
 
 # ---------------------------------------------------------------------------
+# theme_colors：消费者的登记项（MY_PAIRS）深色、浅色各过一遍
+# ---------------------------------------------------------------------------
+
+OTHER_BRAND = "#0055aa"
+
+
+def test_themes_cover_dark_and_light():
+    """示例闸门按 THEMES 参数化——少了 light，消费者的 MY_PAIRS 就又只按深色算。"""
+    assert THEMES == ("dark", "light")
+
+
+def test_theme_colors_without_override_match_the_packaged_themes(
+    colors: dict[str, str], light_colors: dict[str, str]
+):
+    assert theme_colors("dark") == colors
+    assert theme_colors("light") == light_colors
+    assert theme_colors("light") != theme_colors("dark")
+
+
+def test_theme_colors_rejects_an_unknown_theme():
+    with pytest.raises(ValueError):
+        theme_colors("sepia")
+
+
+def test_plain_root_override_is_shadowed_by_the_light_theme(light_colors: dict[str, str]):
+    """`:root { --brand }` 只管深色：浅色下 `:root[data-theme="light"]` 更具体，
+    页面上画的是浅色那份品牌色——闸门也得按它算，不拿一个不生效的值糊弄。"""
+    override = f":root {{ --brand: {OTHER_BRAND}; }}"
+    assert theme_colors("dark", override)["brand"] == OTHER_BRAND
+    assert theme_colors("light", override)["brand"] == light_colors["brand"]
+
+
+def test_override_written_for_both_themes_wins_in_both():
+    override = f':root, :root[data-theme="light"] {{ --brand: {OTHER_BRAND}; }}'
+    assert theme_colors("dark", override)["brand"] == OTHER_BRAND
+    assert theme_colors("light", override)["brand"] == OTHER_BRAND
+
+
+def test_light_only_override_leaves_dark_alone(colors: dict[str, str]):
+    override = f":root[data-theme='light'] {{ --brand: {OTHER_BRAND}; }}"
+    assert theme_colors("dark", override)["brand"] == colors["brand"]
+    assert theme_colors("light", override)["brand"] == OTHER_BRAND
+
+
+def test_consumer_pair_that_only_breaks_in_light_goes_red_in_light():
+    """自证：消费者登记「白字画在卡片上」——深色下卡片是深的、过；浅色下卡片
+    是白的、白字白底。只按深色算会漏掉，按 THEMES 两遍算必须在浅色那遍红。"""
+    my_pairs = (TokenPair("自登记：白字写在卡片上", "on-brand", "card", TEXT_MINIMUM),)
+    assert contrast_failures(theme_colors("dark"), my_pairs) == []
+    assert contrast_failures(theme_colors("light"), my_pairs) == list(my_pairs)
+
+
+# ---------------------------------------------------------------------------
 # 登记表结构约定
 # ---------------------------------------------------------------------------
 
@@ -552,6 +608,8 @@ def test_scan_skips_the_three_allowed_copies_by_default(tmp_path: Path):
         BASE_CSS_NAME,
         "override.css",
     }
+    # 由 ASSET_NAMES 派生：新增落地资产时允许清单自动跟上，不必散改
+    assert set(ALLOWED_HEX_FILE_NAMES) == {*ASSET_NAMES, "override.css"}
     for name in ALLOWED_HEX_FILE_NAMES:
         (tmp_path / name).write_text(":root { --brand: #0055aa; }", encoding="utf-8")
     assert scan_stray_hex(tmp_path) == {}

@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from msui import testing as gate
-from msui.resources import parse_tokens, tokens_css_path
 
 PAGES = Path(__file__).resolve().parent.parent / "pages"
 OVERRIDE = PAGES / gate.OVERRIDE_CSS_NAME  # 默认不存在；要换色时才加
@@ -14,17 +15,11 @@ OVERRIDE = PAGES / gate.OVERRIDE_CSS_NAME  # 默认不存在；要换色时才�
 MY_PAIRS: tuple[gate.TokenPair, ...] = ()
 
 
-def _colors() -> dict[str, str]:
-    tokens = parse_tokens(tokens_css_path().read_text(encoding="utf-8"))
-    if OVERRIDE.is_file():
-        tokens = gate.merge_tokens(
-            tokens, parse_tokens(OVERRIDE.read_text(encoding="utf-8"))
-        )
-    return gate.hex_tokens(tokens)
-
-
-def test_contrast_gate():
-    colors = _colors()
+@pytest.mark.parametrize("theme", gate.THEMES)
+def test_contrast_gate(theme):
+    # 深色、浅色各算一遍（浅色 = tokens-light.css 覆写，按页面实际层叠合 override）
+    override = OVERRIDE.read_text(encoding="utf-8") if OVERRIDE.is_file() else None
+    colors = gate.theme_colors(theme, override)
     failures = gate.contrast_failures(colors, gate.BASE_TOKEN_PAIRS + MY_PAIRS)
     assert not failures, gate.format_contrast_failures(failures, colors)
 
