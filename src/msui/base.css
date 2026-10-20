@@ -3,7 +3,9 @@
  * 引用，本文件不许出现字面色值（十六进制 / rgb() / hsl()），有测试盯着。
  *
  * 覆盖：排版、按钮、操作行、输入框、表单行、进度条、表格、卡片、模态对话框、
- * 提示条、日志区、空态。两条原则：
+ * 提示条、日志区、空态、分段选择、徽章、进场动效；外加 opt-in 的应用式版式
+ * （`<body class="app">`：顶栏 / 多栏 / 状态栏，不挂开关的小工具窗一个像素不变）。
+ * 两条原则：
  *   1. 语义化标签（button / input / table…）直接给默认样式，裸 HTML 就长对；
  *   2. 类名中性（.btn / .card / .input / .empty），不含任何业务语义。
  */
@@ -349,6 +351,146 @@ dialog > * + * { margin-top: var(--space-3); }
 .empty .icon { font-size: 26px; margin-bottom: 10px; }
 .empty .title { font-size: 13px; margin-bottom: 6px; }
 .empty .detail { font-size: 12px; color: var(--muted); }
+
+/* ---- 弹簧：flex 行里把后面的东西推到最右 ----
+   `<span class="grow"></span>`。顶栏里把徽章推到右端就靠它；任何 flex 行
+   （.actions、自己写的工具条）里都能用。 */
+.grow { flex: 1; }
+
+/* ---- 分段选择 .seg：两三个互斥选项，一条槽里并排 ----
+   `<div class="seg"><button class="on">甲</button><button>乙</button></div>`
+   与总程序首页的分段按钮同一副长相——小程序想跟总程序长得像
+   一家人就挂它。当前项挂 .on（页面自己切，同时把 aria-pressed 写对）。
+
+   槽是卡片色 + 一圈分隔线；里面的按钮去掉通用按钮的边框与底，当前项压一层
+   --wash 提亮罩、字变 --text 加粗。`.seg button`（0,1,1）与通用按钮的
+   `button:hover`（0,1,1）同分，**靠写在它后面取胜**（有测试盯着顺序）——
+   不然分段里的按钮 hover 时会冒出通用按钮那块提亮底。小窗、应用式两种版式都
+   能用（新类名，旧页面命中不到）。 */
+.seg {
+  display: inline-flex; flex-shrink: 0; gap: 2px; padding: 3px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+}
+.seg button {
+  border: 0; background: none; color: var(--text-dim);
+  padding: 4px 14px; border-radius: 6px;
+}
+.seg button:hover { color: var(--text); }
+.seg button.on { background: var(--wash); color: var(--text); font-weight: 600; }
+
+/* ---- 徽章 .pill：一小颗胶囊，报日期 / 计数 / 状态 ----
+   `<span class="pill ok">已是最新</span>`。裸 .pill 是中性档（--muted 字 +
+   --wash 底），四个状态修饰与 .notice 同一套：底走 --*-bg 晕染、字走同名实色。
+   **一个 display 都不许写**（同 .notice）：收放靠 hidden 属性。 */
+.pill {
+  font-size: 11px; font-weight: 600; padding: 2px 8px;
+  border-radius: 999px; white-space: nowrap;
+  color: var(--muted); background: var(--wash);
+}
+.pill.ok { color: var(--ok); background: var(--ok-bg); }
+.pill.warn { color: var(--warn); background: var(--warn-bg); }
+.pill.info { color: var(--info); background: var(--info-bg); }
+.pill.error { color: var(--error); background: var(--error-bg); }
+
+/* ---- 进场动效 .fade-in：卡片 / 区块进场时上浮 6px 淡入 ----
+   与总程序卡片的进场同一条曲线（快出慢收，240ms）。一组卡片要错峰时，在元素
+   上写序号 `style="--i: 2"`，每档晚 40ms；不写就是 0、同时进场。
+   fill-mode both：延迟期间停在起始帧（看不见），不先闪一下终态再跳回去。
+   「减少动态效果」下由文件末尾静止段的通配符基线停掉——停掉之后元素直接以
+   终态出现（起始帧的 opacity 0 只活在动画里，元素本身是不透明的）。 */
+.fade-in {
+  animation: msui-card-in 240ms cubic-bezier(.16, 1, .3, 1) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+@keyframes msui-card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- 应用式版式（opt-in）：<body class="app"> 开启，整窗即容器 ----
+   上面那套「body 就是容器」是给 560×520 小工具窗的：内容列停在
+   --content-max 居中，窗口拉大两边空着。宽表格程序（左栏参数 + 右边几十列
+   的表）要的是另一种形态：顶栏 / 多栏主体 / 状态栏三段贴边拼满整窗，
+   内容区各自滚。
+
+   **开关就是 body 上的 class="app"，这一节的每一条规则都挂在 `body.app`
+   之下**（有测试盯着）：不挂开关的小工具窗一条都命中不到，已发版的消费者
+   升级后一个像素不变。
+
+   body 自己 overflow: hidden、不滚：body 一滚，顶栏和状态栏就跟着滚出窗外。
+   滚的是下面的 .pane / .rail。 */
+body.app {
+  max-width: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+/* 三段贴边拼起来，小窗那套块间距在这里归零。特异性 (0,1,1) 压过
+   `body > * + *` 的 (0,0,1)。 */
+body.app > * + * { margin-top: 0; }
+/* 应用式页面里 display: flex 的块到处都是，作者层的任何 display 都会盖掉 UA
+   的 `[hidden] { display: none }`——藏起来的块照样摆着。这里钉回来。只挂在
+   body.app 下：小窗的约定仍是「别给要收放的东西写 display」（见 .notice）。 */
+body.app [hidden] { display: none !important; }
+/* 键盘焦点环：控件多的页面靠 Tab 走，得看得见走到了哪。--info 对窗底与卡片底
+   都过文字档 4.5，焦点环（控件档 3.0）有余量。 */
+body.app :focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+
+/* 顶栏：`<header class="top"><h1>程序名</h1><div class="seg">…</div>
+   <span class="grow"></span><span class="pill">…</span></header>`
+   一行排开、垂直居中；窄窗放不下时折行。 */
+body.app .top {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+}
+
+/* 底部状态栏：`<footer class="status"><span>v1.2.0</span><span>数据目录 …</span>
+   <span class="grow"></span><span>就绪</span></footer>`
+   一条细栏，弱化字、上边一根分隔线；tabular-nums 让版本号 / 计数跳动时不晃。 */
+body.app .status {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: var(--space-1) var(--space-5);
+  border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums;
+}
+
+/* 多栏骨架：`<div class="cols"><aside class="rail">…</aside><main class="pane">…</main></div>`
+   左栏 .rail 定宽（--rail-width）、自己滚、栏内块用 gap 隔开；主区 .pane 吃掉
+   剩余宽度、自己滚。没有左栏的页面直接把 .pane 挂在 body.app 下也成立。
+
+   两处「漏了不报错、整个布局悄悄崩掉」的归零，别删：
+   - .cols 的 `min-height: 0`：flex 子项默认 min-height:auto 不肯缩到内容高度
+     以下，内容一长就把状态栏顶出窗外，.pane 的滚动条永远出不来；
+   - .pane 的 `min-width: 0`：同理在横向——宽表格把主区撑到表格宽，左栏被挤
+     扁、横滚条落到整窗上。.pane 也写 `min-height: 0`，是给它直接挂在
+     body.app 下（竖向 flex）那种写法用的。 */
+body.app .cols { flex: 1; display: flex; min-height: 0; }
+body.app .rail {
+  flex: 0 0 var(--rail-width);
+  border-right: 1px solid var(--border);
+  padding: var(--space-4) var(--space-4) var(--space-5);
+  overflow: auto;
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+body.app .pane {
+  flex: 1; min-width: 0; min-height: 0;
+  overflow: auto; padding: var(--space-5);
+}
+/* 主区里的块间距与小窗 body 同一档。包在 :where() 里把特异性压到 0：写成
+   `body.app .pane > * + *`（0,2,1）会压过 `h1 + p`（0,0,2），主区里每个标题
+   和它的说明段都被拉开一整档。归零后靠源码顺序（写在 `* { margin: 0 }` 之后）
+   生效，`h1 + p` 与 `.card > * + *` 照常压过它。 */
+:where(body.app .pane) > * + * { margin-top: var(--space-5); }
+
+/* ---- 窄窗（< 900px）：左栏退到上面 ----
+   定宽左栏在窄窗里会把主区挤到只剩一条，改成上下排：.cols 竖排，左栏的右边线
+   换成下边线、最高 40vh 自己滚（不然参数一多就把主区挤没了）。
+   断点只能写字面量：@media 里不认 var()。 */
+@media (max-width: 900px) {
+  body.app .cols { flex-direction: column; }
+  body.app .rail {
+    flex: none; max-height: 40vh;
+    border-right: 0; border-bottom: 1px solid var(--border);
+  }
+}
 
 /* ---- 动效可关：系统偏好「减少动态效果」时全体静止 ---- */
 @media (prefers-reduced-motion: reduce) {

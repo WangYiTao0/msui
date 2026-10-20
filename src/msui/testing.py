@@ -164,6 +164,7 @@ NON_HEX_TOKENS = frozenset(
         "space-6",
         "content-max",  # 内容列宽（body 即容器的 max-width）——量值，不是颜色
         "field-label",  # 表单行的标签列宽（.field 的对齐基准）——量值，不是颜色
+        "rail-width",  # 应用式版式左栏 .rail 的宽——量值，不是颜色
         "error-bg",  # error 系半透明底
         "error-strip-border",  # error 系半透明边框
         "error-wash",  # error 系 hover 提亮罩

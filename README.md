@@ -794,6 +794,123 @@ if __name__ == "__main__":
 要它占满剩余高度就覆写 `max-height`（或改 `height`），滚动条是全局那一套，
 不用管。
 
+### 应用式版式（opt-in）：宽表格程序整窗即容器
+
+上面那套「body 就是容器」是给 560×520 小工具窗的：内容列停在 `--content-max`
+居中，窗口拉大两边空着。左栏参数 + 右边几十列宽表格这种程序要的是另一种形态，
+**给 body 挂 `class="app"` 开启**（纯 CSS，`run()` 一个参数不用改）。不挂的
+页面一条新规则都命中不到，小工具窗一个像素不变。骨架照抄这份：
+
+```html
+<!-- examples/minimal/pages/app-layout.html -->
+<!DOCTYPE html>
+<!--
+  应用式版式骨架（opt-in）：宽表格程序（左栏参数 + 右边几十列的表）从这里起步。
+  开关就是 <body class="app">——整窗即容器：顶栏 / 多栏主体 / 状态栏三段贴边
+  拼满整窗，内容区各自滚，body 自己不滚。不挂 class="app" 的页面还是 560×520
+  小工具窗那套（skeleton.html），一个像素不变。
+  三段：
+  - 顶栏 <header class="top">：程序名 + 分段 .seg + 弹簧 .grow + 徽章 .pill；
+  - 多栏 <div class="cols">：左栏 .rail 定宽（--rail-width）、主区 .pane 吃剩余
+    宽度，两边各自滚；窄窗（< 900px）左栏自动退到上面。没有左栏的页面删掉
+    <aside>，.pane 留着即可；
+  - 状态栏 <footer class="status">：版本 / 数据目录 / 当前状态一条细栏。
+  进场动效给块挂 .fade-in，要错峰就在元素上写 style="--i: 序号"；系统开了
+  「减少动态效果」时自动静止。用不上的整块删掉即可。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>应用名</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+</head>
+<body class="app">
+  <header class="top">
+    <h1>应用名</h1>
+    <div class="seg" id="views">
+      <button class="on" aria-pressed="true">视图甲</button>
+      <button aria-pressed="false">视图乙</button>
+    </div>
+    <span class="grow"></span>
+    <span class="pill info">2024-01-31</span>
+    <span class="pill ok">已同步</span>
+  </header>
+  <div class="cols">
+    <aside class="rail">
+      <h2>参数</h2>
+      <div class="field">
+        <label for="src">数据目录</label>
+        <input id="src">
+        <button>浏览</button>
+      </div>
+      <div class="actions">
+        <button class="primary">运行</button>
+        <button>重置</button>
+      </div>
+    </aside>
+    <main class="pane">
+      <h2>结果</h2>
+      <p>主区自己滚；宽表格放这里，窗口拉多大就摊多宽。</p>
+      <div class="card fade-in" style="--i: 0">第一块</div>
+      <div class="card fade-in" style="--i: 1">第二块：错峰晚 40ms 进场</div>
+      <table>
+        <thead><tr><th>名称</th><th>状态</th></tr></thead>
+        <tbody>
+          <tr><td>条目一</td><td><span class="pill ok">完成</span></td></tr>
+          <tr><td>条目二</td><td><span class="pill warn">待确认</span></td></tr>
+        </tbody>
+      </table>
+    </main>
+  </div>
+  <footer class="status">
+    <span>v1.0.0</span>
+    <span>数据目录 D:/数据</span>
+    <span class="grow"></span>
+    <span>就绪</span>
+  </footer>
+  <script>
+    // 分段选择：当前项挂 .on，aria-pressed 跟着写对。
+    const views = document.getElementById("views");
+    views.addEventListener("click", (event) => {
+      const picked = event.target.closest("button");
+      if (!picked) return;
+      for (const button of views.querySelectorAll("button")) {
+        const on = button === picked;
+        button.classList.toggle("on", on);
+        button.setAttribute("aria-pressed", String(on));
+      }
+    });
+  </script>
+</body>
+</html>
+```
+
+- **三段贴边拼满整窗**：顶栏 `.top` / 多栏 `.cols` / 状态栏 `.status`，body 自己
+  不滚，滚的是左栏 `.rail` 与主区 `.pane`——这样顶栏和状态栏永远钉在窗口上下；
+- **多栏**：左栏定宽走 `--rail-width`（300px，左栏内容宽窄不同就用 override.css
+  覆写这一个变量）、主区吃掉剩余宽度。窄窗（< 900px）左栏自动退到上面、最高
+  40vh 自己滚。没有左栏的页面把 `.pane` 直接挂在 body 下也成立；
+- 自己往骨架里加 flex 容器时记着两处归零（base.css 里 `.cols` / `.pane` 已经
+  写了）：竖向 flex 子项要 `min-height: 0`、横向要 `min-width: 0`，漏了不报错，
+  表现是滚动条出不来、宽表格把整窗撑出横滚条；
+- 主区里的块间距、标题与说明段的紧排与小窗同一套，照写裸语义 HTML；
+- 应用式页面里 `hidden` 属性一律压过作者写的 `display`（小窗仍然是「别给要
+  收放的东西写 display」那条约定）；Tab 走到的控件有一圈 `--info` 焦点环。
+
+顶栏里的两样部件**不限于应用式**，小窗里也能用：
+
+- **分段选择 `.seg`**：两三个互斥选项挤在一条槽里，当前项挂 `.on`（同时把
+  `aria-pressed` 写对）。与总程序首页的分段按钮同一副长相；
+- **徽章 `.pill`**：一小颗胶囊报日期 / 计数 / 状态。裸 `.pill` 是中性档，四个
+  状态 `ok` / `warn` / `info` / `error` 与 `.notice` 同一套配色；收放同样用
+  `hidden`，别给它写 `display`；
+- **弹簧 `.grow`**：flex 行里把后面的东西推到最右（顶栏把徽章推到右端就靠它）。
+
+卡片、区块进场时要一点动静就挂 **`.fade-in`**（上浮 6px 淡入，240ms）；一组要
+错峰时在元素上写 `style="--i: 序号"`，每档晚 40ms。系统开了「减少动态效果」时
+自动静止、直接以终态出现，不用自己处理。
+
 ## 4. override.css（默认不用）
 
 默认零配置、不建这个文件。真要换色（比如另一套品牌色）时：
@@ -1072,6 +1189,14 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
     （error/warn/info/ok），显示/隐藏用 hidden 属性，不要给它写 display；
     跑批日志用 <pre class="log">（等宽、自己滚、长行不折行横向滚动），要占
     满剩余高度就覆写 max-height。
+15. 宽表格程序（左栏参数 + 右边宽表）用应用式版式：给 body 挂 class="app"
+    （纯 CSS，run() 不改），从 msui README §3 的 app-layout.html 可抄块起步——
+    顶栏 <header class="top"> / 多栏 <div class="cols"> 里左栏 .rail +
+    主区 .pane / 底部 <footer class="status">，内容区各自滚，窄窗左栏自动
+    退到上面；左栏宽走 --rail-width。不挂 app 的页面仍是小工具窗版式。
+    互斥选项用 .seg（当前项挂 .on），日期/计数/状态胶囊用 .pill（可加
+    ok/warn/info/error），flex 行里推到最右用 .grow，进场动效挂 .fade-in
+    （错峰写 style="--i: 序号"）。这些都不许自己写版式 CSS 或配色。
 ```
 
 ## 发布（维护者）

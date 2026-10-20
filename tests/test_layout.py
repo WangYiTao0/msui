@@ -623,3 +623,332 @@ def test_the_motion_scan_catches_longhand_and_transition_too():
         ".transition-only",
         ".transition-longhand",
     }
+
+
+# ---------------------------------------------------------------------------
+# 应用式版式（票 #21）：<body class="app"> 开启，整窗即容器
+# ---------------------------------------------------------------------------
+#
+# 小工具窗（不挂 class="app"）一个像素不变是 spec #25 的第一条约束：已发版的
+# 三个消费者全是 560×520 单列小窗，升级后不该看到任何版式变化。所以这一节的
+# 版式规则**全部**挂在 `body.app` 之下——不挂开关类的页面一条都命中不到。
+
+
+def test_app_body_turns_the_whole_window_into_the_container():
+    """整窗即容器：去掉内容列宽与居中、内衬归零、竖排 flex、body 自己不滚。
+
+    内容区（.pane / .rail）各自滚——body 一滚，顶栏和状态栏就跟着滚出窗外。
+    """
+    app = rule("body.app")
+    assert "max-width: none" in app
+    assert "margin: 0" in app
+    assert "padding: 0" in app
+    assert "display: flex" in app and "flex-direction: column" in app
+    assert "overflow: hidden" in app
+
+
+def test_app_body_drops_the_small_window_sibling_rhythm():
+    """顶栏 / 多栏 / 状态栏是贴边拼起来的三段，body 级的块间距在这里归零。"""
+    assert re.search(r"margin-top:\s*0\s*;", rule("body.app > * + *"))
+
+
+# 只在应用式版式里才有意义的类：多栏骨架（.cols / .rail / .pane）、顶栏
+# .top、底部状态栏 .status。它们的规则（含窄窗那段 @media 里的）一律挂在
+# body.app 之下。.seg / .pill / .fade-in 是**部件**不是版式，小窗里也能用，
+# 不在此列——它们是新类名，旧页面没写过，加了也命中不到旧元素。
+APP_ONLY_CLASSES = ("app", "cols", "rail", "pane", "top", "status")
+
+
+def all_selectors(css: str = BASE) -> list[str]:
+    """CSS 里每一条规则的每一个选择器（逗号拆开），含 @media 里嵌着的。
+
+    先剥注释（注释里逐字写着选择器）；@keyframes 里的 from / to / 百分比
+    不是选择器，整段剔掉。
+    """
+    body = CSS_COMMENT_RE.sub("", css)
+    body = re.sub(r"@keyframes[^{]*\{(?:[^{}]*\{[^}]*\})*\s*\}", "", body)
+    found: list[str] = []
+    for head in re.findall(r"([^{};]+)\{[^{}]*\}", body):
+        head = head.strip()
+        if head.startswith("@"):
+            continue
+        found.extend(part.strip() for part in head.split(","))
+    return found
+
+
+def is_app_scoped(selector: str) -> bool:
+    return selector.startswith(("body.app", ":where(body.app"))
+
+
+def test_every_app_layout_rule_hangs_under_the_body_app_switch():
+    """不挂 class="app" 的页面一条都命中不到——「小窗一个像素不变」的文本层证明。
+
+    先自证扫描没坏（已知的 body.app 规则、@media 里嵌着的规则都扫得到），
+    再逐条核对：选择器里提到应用式专属类、或 [hidden] / :focus-visible 这类
+    全局改写的，必须以 body.app 开头。
+    """
+    selectors = all_selectors()
+    assert "body.app" in selectors, "扫描没扫到 body.app——扫描本身坏了，它的绿不作数"
+    assert "progress::-webkit-progress-bar" in selectors, "@media 里嵌着的规则没扫到"
+    pattern = re.compile(
+        r"\.(?:" + "|".join(APP_ONLY_CLASSES) + r")(?![\w-])|\[hidden\]|:focus-visible"
+    )
+    leaks = [s for s in selectors if pattern.search(s) and not is_app_scoped(s)]
+    assert not leaks, f"这些规则没挂在 body.app 下，会漏进小工具窗：{leaks}"
+
+
+def test_the_small_window_body_rules_are_the_only_unscoped_body_rules():
+    """小窗那几条 body 规则之外，不许再出现不带开关的 body 选择器。
+
+    新版式要改 body 时只能写 `body.app …`；直接改 `body` 等于改了所有消费者。
+    """
+    # 按出现次数比（不是集合）：`html, body` 已经贡献了一个 "body"，再新增一条
+    # `html, body { … }` 的话集合看不出来，计数看得出来。
+    unscoped = sorted(
+        s for s in all_selectors() if re.search(r"\bbody\b", s) and not is_app_scoped(s)
+    )
+    assert unscoped == ["body", "body", "body > * + *"], unscoped
+
+
+def test_the_small_window_body_rule_gains_no_new_properties():
+    """小窗 body 那条规则的属性集合钉死在 0.9.0 的样子。
+
+    上一条只管「没有新的不带开关的 body 选择器」，管不到有人图省事把
+    display: flex / overflow: hidden 直接塞进现有的 `body { … }`——那同样是改了
+    所有消费者。应用式要的东西一律写进 `body.app`。
+    """
+    declarations = CSS_COMMENT_RE.sub("", rule("body")).split(";")
+    props = {d.split(":")[0].strip() for d in declarations if d.strip()}
+    assert props == {
+        "color", "font-family", "font-size", "-webkit-font-smoothing",
+        "max-width", "margin-inline", "padding",
+    }, props
+
+
+# ---------------------------------------------------------------------------
+# 多栏骨架：.cols > .rail（定宽左栏）+ .pane（主区）
+# ---------------------------------------------------------------------------
+
+
+def test_cols_fills_the_rest_of_the_window_and_may_shrink():
+    """多栏行吃掉顶栏与状态栏之外的全部高度；min-height: 0 让它肯缩，
+    里面的 .pane / .rail 才滚得起来（不归零的话内容一长就把状态栏顶出窗外）。"""
+    cols = rule("body.app .cols")
+    assert "display: flex" in cols
+    assert re.search(r"flex: 1\b", cols)
+    assert "min-height: 0" in cols
+
+
+def test_rail_is_a_fixed_width_scrolling_side_column():
+    rail = rule("body.app .rail")
+    assert "flex: 0 0 var(--rail-width)" in rail, "左栏定宽走 --rail-width 一个 token"
+    assert "border-right: 1px solid var(--border)" in rail
+    assert "overflow: auto" in rail
+    assert re.search(r"padding: var\(--space-\d\)", rail)
+
+
+def test_pane_grows_and_must_be_allowed_to_shrink_below_its_content():
+    """⚠️ min-width: 0 漏了整个布局崩掉不报错：宽表格把 .pane 撑到内容宽，
+    左栏被挤扁、横滚条落到整窗上。min-height: 0 同理（.pane 直接挂在 body.app
+    下、不包 .cols 时，竖向也要肯缩才滚得起来）。"""
+    pane = rule("body.app .pane")
+    assert re.search(r"flex: 1\b", pane)
+    assert "min-width: 0" in pane
+    assert "min-height: 0" in pane
+    assert "overflow: auto" in pane
+    assert re.search(r"padding: var\(--space-\d\)", pane)
+
+
+def test_rail_width_token_exists_and_is_whitelisted():
+    assert TOKENS.get("rail-width", "").endswith("px")
+    assert "rail-width" in NON_HEX_TOKENS
+
+
+def test_narrow_window_stacks_the_rail_on_top():
+    """窄窗（< 900px）左栏退到上面：多栏改竖排，左栏的右边线换成下边线。"""
+    match = re.search(
+        r"(?m)^@media \(max-width: 900px\)\s*\{\n(.*?)^\}", BASE, re.DOTALL
+    )
+    assert match, "base.css 里找不到窄窗那段 @media (max-width: 900px)"
+    narrow = CSS_COMMENT_RE.sub("", match.group(1))
+    cols = re.search(r"body\.app \.cols\s*\{([^}]*)\}", narrow)
+    rail = re.search(r"body\.app \.rail\s*\{([^}]*)\}", narrow)
+    assert cols and "flex-direction: column" in cols.group(1)
+    assert rail and "border-right: 0" in rail.group(1)
+    assert "border-bottom: 1px solid var(--border)" in rail.group(1)
+
+
+def test_pane_rhythm_never_outranks_the_heading_lede_pair():
+    """主区里的块间距与小窗 body 同一档，但特异性必须压到 0。
+
+    `h1 + p`（0,0,2）的紧排要压过块间距；写成 `body.app .pane > * + *`
+    （0,2,1）的话，主区里每个标题和它的说明段都会被拉开一整档。所以选择器
+    包在 :where() 里，特异性归零、靠源码顺序压过 `* { margin: 0 }`。
+    """
+    flow = rule(":where(body.app .pane) > * + *")
+    assert re.search(r"margin-top: var\(--space-\d\)", flow)
+    assert rule_pos(":where(body.app .pane) > * + *") > rule_pos("*"), (
+        "特异性归零之后靠源码顺序胜出，必须写在 `* { margin: 0 }` 之后"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 顶栏 .top + 分段 .seg + 徽章 .pill；底部状态栏 .status
+# ---------------------------------------------------------------------------
+
+
+def test_top_bar_is_a_single_centred_row():
+    top = rule("body.app .top")
+    assert "display: flex" in top and "align-items: center" in top
+    assert re.search(r"gap: var\(--space-\d\)", top)
+    assert re.search(r"padding: var\(--space-\d\) var\(--space-\d\)", top)
+    assert "flex-wrap: wrap" in top, "窄窗放不下时折行，不许横向溢出"
+
+
+def test_grow_pushes_the_rest_of_a_flex_row_to_the_far_end():
+    """`<span class="grow"></span>`：顶栏里把徽章推到最右的那根弹簧。"""
+    assert re.search(r"flex: 1\b", rule(".grow"))
+
+
+def test_status_bar_is_a_thin_muted_strip_with_a_top_rule():
+    status = rule("body.app .status")
+    assert "display: flex" in status and "align-items: center" in status
+    assert "border-top: 1px solid var(--border)" in status
+    assert "color: var(--muted)" in status
+    assert "font-variant-numeric: tabular-nums" in status, "版本号 / 计数跳动时不晃"
+    assert re.search(r"padding: var\(--space-\d\) var\(--space-\d\)", status)
+
+
+def test_seg_is_a_card_coloured_track_of_borderless_buttons():
+    seg = rule(".seg")
+    assert "display: inline-flex" in seg
+    assert "background: var(--card)" in seg and "border: 1px solid var(--border)" in seg
+    button = rule(".seg button")
+    assert "border: 0" in button and "background: none" in button
+
+
+def test_seg_marks_the_current_option_with_on():
+    on = rule(".seg button.on")
+    assert "background: var(--wash)" in on and "color: var(--text)" in on
+    assert "font-weight: 600" in on
+
+
+def test_seg_button_overrides_the_base_button_by_source_order():
+    """`.seg button`（0,1,1）与 `button:hover`（0,1,1）同分，靠写在后面取胜——
+    否则分段里的按钮 hover 时会冒出通用按钮那块提亮底。"""
+    assert rule_pos(".seg button") > rule_pos("button:hover, .btn:hover")
+
+
+PILL_STATES = ("ok", "warn", "info", "error")
+
+
+def test_pill_is_a_neutral_capsule_by_default():
+    pill = rule(".pill")
+    assert "border-radius: 999px" in pill
+    assert "white-space: nowrap" in pill
+    assert "color: var(--muted)" in pill and "background: var(--wash)" in pill
+    assert "display" not in pill, (
+        "同 .notice：显示/隐藏靠 hidden 属性，写了 display 会盖掉 UA 的 [hidden]"
+    )
+
+
+@pytest.mark.parametrize("state", PILL_STATES)
+def test_each_pill_state_paints_its_tint_and_solid_text(state: str):
+    block = rule(f".pill.{state}")
+    assert f"background: var(--{state}-bg)" in block
+    assert f"color: var(--{state})" in block
+
+
+def test_app_hidden_really_hides_even_over_author_display():
+    """应用式页面里 display: flex 的块到处都是，作者层的 display 会盖掉 UA 的
+    `[hidden] { display: none }`。在 body.app 下把它钉回来；小窗不动。"""
+    assert "display: none !important" in rule("body.app [hidden]")
+
+
+def test_app_focus_ring_is_visible_and_token_coloured():
+    ring = rule("body.app :focus-visible")
+    assert re.search(r"outline: 2px solid var\(--info\)", ring)
+
+
+# 新部件画出来的「前景 × 底」组合。每一条：规则里真用了那个前景 token（防止
+# 这张表与 CSS 脱节），且这一对已在 testing.BASE_TOKEN_PAIRS 里登记——登记了
+# 就意味着深色与浅色两套 token 都过同一道闸门（test_testing 跑全表）。
+# 底只有 card / win 两种：部件要么摆在窗底上（顶栏、状态栏），要么摆在卡片里；
+# 半透明的 --wash / --*-bg 叠在它们上面，可读性由透出来的实色底承担（与 .notice
+# 同一惯例）。
+WIDGET_PAIRS = (
+    (".seg", "border", "card"),
+    (".seg", "border", "win"),
+    (".seg button", "text-dim", "card"),
+    (".seg button.on", "text", "card"),
+    (".seg button:hover", "text", "card"),
+    (".pill", "muted", "card"),
+    (".pill", "muted", "win"),
+    *((f".pill.{s}", s, "card") for s in PILL_STATES),
+    *((f".pill.{s}", s, "win") for s in PILL_STATES),
+    ("body.app .status", "muted", "win"),
+    ("body.app .status", "border", "win"),
+    ("body.app .rail", "border", "win"),
+    ("body.app :focus-visible", "info", "win"),
+    ("body.app :focus-visible", "info", "card"),
+)
+
+COLOUR_PROPS_RE = re.compile(
+    r"\b(color|background(?:-color)?|border(?:-[a-z]+)*|outline(?:-color)?)\s*:\s*([^;]+);"
+)
+
+
+@pytest.mark.parametrize("selector", sorted({s for s, _, _ in WIDGET_PAIRS}))
+def test_new_widget_colours_come_only_from_tokens(selector: str):
+    """新部件的每一条着色声明只许是 var(--token)（或 none / 0 / transparent）。"""
+    for prop, value in COLOUR_PROPS_RE.findall(rule(selector)):
+        if prop.startswith("border") and ("radius" in prop or "width" in prop):
+            continue
+        rest = re.sub(r"var\(--[\w-]+\)", "", value)
+        rest = re.sub(r"\b(none|transparent|0|solid|\d+px)\b", "", rest)
+        assert not rest.strip(), f"{selector} 的 {prop} 写了 token 之外的东西：{value!r}"
+
+
+@pytest.mark.parametrize(("selector", "fg", "bg"), WIDGET_PAIRS)
+def test_new_widget_pairs_are_registered_for_both_themes(selector: str, fg: str, bg: str):
+    from msui.testing import BASE_TOKEN_PAIRS
+
+    assert f"var(--{fg})" in rule(selector), f"{selector} 里没用 --{fg}，这张表与 CSS 脱节了"
+    registered = {(p.foreground, p.background) for p in BASE_TOKEN_PAIRS}
+    assert (fg, bg) in registered, (
+        f"{selector} 把 --{fg} 画在 --{bg} 上，但这一对没在 BASE_TOKEN_PAIRS 里登记"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 进场动效 .fade-in：卡片 / 区块进场时上浮淡入
+# ---------------------------------------------------------------------------
+
+
+def test_fade_in_rises_and_fades_through_its_own_keyframes():
+    """关键帧带 msui- 前缀（与 msui-progress-loop 同一惯例），不跟页面自己的撞名。"""
+    fade = rule(".fade-in")
+    assert re.search(r"animation: msui-card-in \d+ms", fade)
+    assert "both" in fade, "fill-mode both：延迟期间停在起始帧，不先闪一下终态"
+    assert "var(--i, 0)" in fade, "错峰靠元素上的 --i 序号，缺省 0"
+    frames = re.search(r"@keyframes msui-card-in\s*\{(.*?)\n\}", BASE, re.DOTALL)
+    assert frames, "进场动效的关键帧不见了"
+    assert "opacity: 0" in frames.group(1) and "translateY" in frames.group(1)
+
+
+def test_fade_in_is_stopped_by_reduced_motion():
+    """新动效必须被「减少动态效果」管住。
+
+    .fade-in 挂在元素上（不是厂商伪元素），归静止段的通配符基线管：先确认
+    扫描认得出它是一条会动的规则，再确认它没躲到通配符够不到的伪元素上、
+    基线那条确实把 animation 停掉。fill-mode both 的起始帧是 opacity 0——
+    animation: none 之后元素直接以终态（不透明）出现，不会停在看不见的那一帧。
+    """
+    animated = animated_selectors()
+    assert ".fade-in" in animated, "扫描没认出 .fade-in 会动——扫描坏了，它的绿不作数"
+    assert VENDOR_PSEUDO_RE.search(".fade-in") is None
+    baseline = re.search(r"\*, \*::before, \*::after\s*\{([^}]*)\}", reduced_motion_block())
+    assert baseline, "静止段里找不到通配符基线那条"
+    assert "animation: none !important" in baseline.group(1), (
+        "通配符基线不停 animation 的话 .fade-in 照跑（静止段里别的规则停的是伪元素）"
+    )
