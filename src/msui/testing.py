@@ -22,7 +22,7 @@
         offenders = gate.scan_stray_hex(Path("static"))
         assert not offenders, gate.format_stray_hex(offenders)
 
-四个零件：
+五个零件：
 
   1. WCAG 2.x 公式（`relative_luminance` / `contrast_ratio`）随包，消费者
      不用抄公式；
@@ -32,7 +32,9 @@
      用到的前景/背景组合；消费者用 `BASE_TOKEN_PAIRS + (自己的登记项,)`
      追加自己页面的组合；
   4. `scan_stray_hex`：扫描给定目录下的前端文件，token 允许清单之外不许
-     出现手写十六进制色值——扫描目录与允许清单都是显式入参，不隐式推导。
+     出现手写十六进制色值——扫描目录与允许清单都是显式入参，不隐式推导；
+  5. `scan_base_redefinitions`：消费者自己的样式（pages/layout.css 等任意
+     .css、html 内联 <style>）只许加新选择器，不许重定义 base.css 已有的。
 
 包自己的 `tests/test_testing.py` 用这套零件对 `tokens.css` + `base.css`
 把过一遍闸门（共享侧一次把关），并带全部自证测试。
@@ -50,7 +52,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .resources import BASE_CSS_NAME, TOKENS_CSS_NAME, TOKENS_LIGHT_CSS_NAME
+from .resources import (
+    ASSET_NAMES,
+    BASE_CSS_NAME,
+    TOKENS_CSS_NAME,
+    TOKENS_LIGHT_CSS_NAME,
+    base_css_path,
+)
 
 __all__ = [
     "ALLOWED_HEX_FILE_NAMES",
@@ -59,6 +67,7 @@ __all__ = [
     "DISABLED_MINIMUM",
     "HEX_COLOR_RE",
     "HEX_LITERAL_RE",
+    "LAYOUT_CSS_NAME",
     "NON_HEX_TOKENS",
     "OVERRIDE_CSS_NAME",
     "SCANNED_SUFFIXES",
@@ -68,11 +77,14 @@ __all__ = [
     "TokenPair",
     "contrast_failures",
     "contrast_ratio",
+    "format_base_redefinitions",
     "format_contrast_failures",
     "format_stray_hex",
     "hex_tokens",
     "merge_tokens",
+    "redefined_base_selectors",
     "relative_luminance",
+    "scan_base_redefinitions",
     "scan_stray_hex",
 ]
 
@@ -402,6 +414,109 @@ def format_stray_hex(offenders: Mapping[Path, list[str]]) -> str:
         return ""
     return "以下文件出现手写十六进制色值，应改用 token 变量：\n" + "\n".join(
         f"  {path}: {matches}" for path, matches in offenders.items()
+    )
+
+
+# ---------------------------------------------------------------------------
+# 自己的版式（layout.css）：不许重定义 base.css 已有的选择器
+#
+# 契约给消费者开的口子：只有自己要的版式与专属部件写进 pages/layout.css
+# （<link> 在 base.css 之后）。口子的边界是「只许加、不许改」——base.css 里
+# 已有的选择器（button、.seg button、.chip.on……）在消费者文件里再写一遍，
+# 就是悄悄改共享部件的长相，一家人变两家。这里按**整条选择器**比对（空白、
+# 组合符两侧空格、属性值引号先归一），不按类名：`.empty .icon` 与
+# `button.icon` 是两条不同的选择器，`.icon` 单写不算重定义。它是一根绊线，
+# 不是证明——`.nav button` 这类带自己前缀的后代选择器照样能改到按钮，那
+# 属于 code review 的事。
+# ---------------------------------------------------------------------------
+
+LAYOUT_CSS_NAME = "layout.css"
+
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_KEYFRAMES_RE = re.compile(r"@keyframes[^{]*\{(?:[^{}]*\{[^}]*\})*\s*\}")
+_RULE_HEAD_RE = re.compile(r"([^{};]+)\{[^{}]*\}")
+
+
+def _normalize_selector(selector: str) -> str:
+    selector = re.sub(r"\s*([>+~])\s*", r"\1", selector.strip())
+    selector = re.sub(r"\s+", " ", selector)
+    return selector.replace('"', "").replace("'", "")
+
+
+def _css_selectors(css: str) -> list[str]:
+    """每一条规则的每一个选择器（逗号拆开、已归一），含 @media 里嵌着的。
+
+    先剥注释（注释里常逐字写着选择器）；@keyframes 里的 from / to / 百分比
+    不是选择器，整段剔掉；@ 开头的规则头（@media 本身、@font-face）不算。
+    """
+    body = _KEYFRAMES_RE.sub("", _CSS_COMMENT_RE.sub("", css))
+    found: list[str] = []
+    for head in _RULE_HEAD_RE.findall(body):
+        head = head.strip()
+        if head.startswith("@"):
+            continue
+        found.extend(_normalize_selector(part) for part in head.split(",") if part.strip())
+    return found
+
+
+def redefined_base_selectors(css: str, *, base_css: str | None = None) -> list[str]:
+    """`css` 里与 base.css 已有选择器重名的那些（按出现顺序、去重）。空 = 干净。
+
+    `base_css` 默认读包内 base.css——消费者装的是哪一版 msui，就按哪一版的
+    选择器清单比对；显式传入只为自证测试。
+    """
+    if base_css is None:
+        base_css = base_css_path().read_text(encoding="utf-8")
+    taken = set(_css_selectors(base_css))
+    hits: list[str] = []
+    for selector in _css_selectors(css):
+        if selector in taken and selector not in hits:
+            hits.append(selector)
+    return hits
+
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+_STYLE_BLOCK_RE = re.compile(r"<style\b[^>]*>(.*?)</style>", re.DOTALL | re.IGNORECASE)
+
+
+def scan_base_redefinitions(
+    scan_dir: Path,
+    *,
+    skipped_names: Collection[str] = ASSET_NAMES,
+    base_css: str | None = None,
+) -> dict[Path, list[str]]:
+    """递归扫 `scan_dir`，返回 `{文件路径: [重定义了的 base.css 选择器, …]}`。
+
+    受检的是消费者**自己的**样式：每一份 .css（layout.css 或任意名，含
+    override.css——它本该只有 `:root`）与每份 .html 里的内联 `<style>` 块。
+    跳过的只有 copy_assets 落下的包内副本（`skipped_names`，默认
+    ASSET_NAMES）。空字典 = 干净。
+    """
+    offenders: dict[Path, list[str]] = {}
+    for path in sorted(scan_dir.rglob("*")):
+        if not path.is_file() or path.name in skipped_names:
+            continue
+        if path.suffix == ".css":
+            css = path.read_text(encoding="utf-8")
+        elif path.suffix == ".html":
+            html = _HTML_COMMENT_RE.sub("", path.read_text(encoding="utf-8"))
+            css = "\n".join(_STYLE_BLOCK_RE.findall(html))
+        else:
+            continue
+        hits = redefined_base_selectors(css, base_css=base_css)
+        if hits:
+            offenders[path] = hits
+    return offenders
+
+
+def format_base_redefinitions(offenders: Mapping[Path, list[str]]) -> str:
+    """把违规清单排成人话：哪个文件、重定义了哪些共享选择器、该怎么办。"""
+    if not offenders:
+        return ""
+    return (
+        "以下文件重定义了 base.css 已有的选择器（会悄悄改掉共享部件的长相）：\n"
+        + "\n".join(f"  {path}: {hits}" for path, hits in offenders.items())
+        + "\n换个自己的类名写；别的小程序也会要的改动，开票回 msui。"
     )
 
 

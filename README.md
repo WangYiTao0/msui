@@ -15,7 +15,7 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 两处版本号**：
 
 ```
-msui @ https://github.com/WangYiTao0/msui/releases/download/v0.9.0/msui-0.9.0-py3-none-any.whl
+msui @ https://github.com/WangYiTao0/msui/releases/download/v0.10.0/msui-0.10.0-py3-none-any.whl
 ```
 
 另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
@@ -61,7 +61,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.9.0"
+MSUI_PINNED = "0.10.0"
 
 
 class Api:
@@ -1098,14 +1098,40 @@ msui 自带一套官方浅色：`tokens-light.css`，`copy_assets` 每次启动�
   tokens 上（有 override 再合 override），同一张表过一遍；
 - 已知限制：Windows 原生标题栏开窗时染成深色的 `--win`，页面切浅色时它不跟着变。
 
+### 自己的版式：layout.css（默认不用）
+
+msui 管的是「一家人」那部分：同一套 token、同一种控件、同一套版式骨架。一个
+真实的业务小程序总有**只有它自己要**的版式和部件（页面导航、工序链、追溯侧栏、
+一类一行的设置行……），它们的正式位置是 `pages/layout.css`：
+
+- **判据只有一条**：别的小程序也会要的 → **开票回 msui**（收进 base.css，大家
+  升级一起拿到）；只有你要的 → **layout.css**。拿不准就先开票问；
+- 页面里在 `base.css` **之后**加 `<link rel="stylesheet" href="layout.css">`；
+- **只许加、不许改**：用自己的新类名写版式与专属部件，不许重写 base.css 里
+  已有的选择器（`button`、`button:hover`、`.seg button`、`.chip.on`、`dialog`、
+  `.dot::before`……）——那等于悄悄改共享部件的长相，一家人变两家。闸门
+  `scan_base_redefinitions` 按**整条选择器**比对（空白、引号写法不同也认得出），
+  命中当场红。它是绊线不是证明：`.nav button` 这种带自己前缀的后代选择器过得了
+  闸门，也只该改你自己那块区域里的东西；
+- **配色照旧只许 `var(--token)`**：layout.css 不在 hex 允许清单里，手写 hex
+  `scan_stray_hex` 照抓（闸门只认得 hex 字面量，`rgb()` / 颜色名同样不许写）；
+  自己部件新用到的前景/背景组合登记进 `MY_PAIRS`；
+- 它是你自己的文件、**要入仓**：`copy_assets` 不落它也不碰它，`.gitignore`
+  别排除它；
+- 层叠：layout.css 在 base.css 之后加载，特异性相同时它赢——自己的部件要压过
+  通用的 `button:hover` 这类规则，靠的就是这个先后；
+- html 里的内联 `<style>` 与任意名的 css 受同一条闸门检查；专属样式集中放
+  layout.css 一处，最好找。
+
 ## 5. 闸门测试
 
-自己仓里放一份下面的文件，pytest 就有两条样式闸门：配色对比度（WCAG 档位）
-与防游离色值扫描：
+自己仓里放一份下面的文件，pytest 就有三条样式闸门：配色对比度（WCAG 档位）、
+防游离色值扫描，以及「自己的样式（layout.css、任意名的 css、html 内联
+`<style>`）不许重定义 base.css 已有的选择器」：
 
 ```python
 # examples/minimal/tests/test_style_gate.py
-"""样式闸门：对比度 + 防游离色值。整份可照抄，零件全部来自 msui.testing。"""
+"""样式闸门：对比度 + 防游离色值 + 不改共享部件。整份可照抄，零件全部来自 msui.testing。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -1115,6 +1141,7 @@ from msui.resources import parse_tokens, tokens_css_path
 
 PAGES = Path(__file__).resolve().parent.parent / "pages"
 OVERRIDE = PAGES / gate.OVERRIDE_CSS_NAME  # 默认不存在；要换色时才加
+# 自己的版式与专属部件写 PAGES / gate.LAYOUT_CSS_NAME（默认不存在；要时才加）
 
 # 页面自己的前景/背景组合往这里追加登记：gate.TokenPair(说明, 前景, 背景, 档位)
 MY_PAIRS: tuple[gate.TokenPair, ...] = ()
@@ -1138,6 +1165,12 @@ def test_contrast_gate():
 def test_no_stray_hex():
     offenders = gate.scan_stray_hex(PAGES)
     assert not offenders, gate.format_stray_hex(offenders)
+
+
+def test_own_css_never_redefines_base_selectors():
+    # 扫 pages/ 下自己的 .css（含 layout.css）与 html 内联 <style>
+    offenders = gate.scan_base_redefinitions(PAGES)
+    assert not offenders, gate.format_base_redefinitions(offenders)
 ```
 
 ## 打包成冻结产物（PyInstaller）
@@ -1278,7 +1311,7 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
 ```text
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
-   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.9.0/msui-0.9.0-py3-none-any.whl
+   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.10.0/msui-0.10.0-py3-none-any.whl
    另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
    要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
@@ -1295,8 +1328,9 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
    变量值，并在 base.css 之后 <link> 它。浅色主题（默认不开）：base.css 之后
    <link> tokens-light.css，再给 <html> 设 data-theme="light"；品牌色底上的
    文字用 var(--on-brand)，不用 var(--text)。
-6. 测试加两条样式闸门（照抄 msui README 的 test_style_gate.py）：
-   contrast_failures 对比度 + scan_stray_hex 防游离色值。
+6. 测试加三条样式闸门（照抄 msui README 的 test_style_gate.py）：
+   contrast_failures 对比度 + scan_stray_hex 防游离色值 +
+   scan_base_redefinitions 不重定义 base.css 已有选择器。
 7. PyInstaller spec 里对 msui 零资源配置（包自带 hook 收齐样式与元数据），
    datas 只写自己的 ("pages", "pages")。
 8. 版本核对：copy_assets 落下的 css 第一行是 /* msui X.Y.Z */。冒烟里定义
@@ -1350,6 +1384,11 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
     aria-checked="false">（点击翻 aria-checked）、状态点 .dot（ok/warn/
     info/error）。收放用 hidden、不写 display。冒烟里取表格单元格按表头
     文字找列，**不按下标**——加列 / 挪列后下标取值会整体错位。
+17. 只有本程序要的版式与专属部件（页面导航、工序链这类）写进
+    pages/layout.css（在 base.css 之后 <link>，入仓）：只用自己的新类名，
+    不许重写 base.css 已有的选择器（button、.seg button、dialog……，闸门
+    会红），配色只许 var(--token)。别的小程序也会要的部件不写这里——
+    开票回 msui。
 ```
 
 ## 发布（维护者）

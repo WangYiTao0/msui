@@ -1,4 +1,4 @@
-"""样式闸门：对比度 + 防游离色值。整份可照抄，零件全部来自 msui.testing。"""
+"""样式闸门：对比度 + 防游离色值 + 不改共享部件。整份可照抄，零件全部来自 msui.testing。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,6 +8,7 @@ from msui.resources import parse_tokens, tokens_css_path
 
 PAGES = Path(__file__).resolve().parent.parent / "pages"
 OVERRIDE = PAGES / gate.OVERRIDE_CSS_NAME  # 默认不存在；要换色时才加
+# 自己的版式与专属部件写 PAGES / gate.LAYOUT_CSS_NAME（默认不存在；要时才加）
 
 # 页面自己的前景/背景组合往这里追加登记：gate.TokenPair(说明, 前景, 背景, 档位)
 MY_PAIRS: tuple[gate.TokenPair, ...] = ()
@@ -31,3 +32,9 @@ def test_contrast_gate():
 def test_no_stray_hex():
     offenders = gate.scan_stray_hex(PAGES)
     assert not offenders, gate.format_stray_hex(offenders)
+
+
+def test_own_css_never_redefines_base_selectors():
+    # 扫 pages/ 下自己的 .css（含 layout.css）与 html 内联 <style>
+    offenders = gate.scan_base_redefinitions(PAGES)
+    assert not offenders, gate.format_base_redefinitions(offenders)

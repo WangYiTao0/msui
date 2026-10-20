@@ -571,3 +571,128 @@ def test_scan_recurses_and_only_reads_frontend_suffixes(tmp_path: Path):
     (tmp_path / "gen.py").write_text("COLOR = '#abcdef'", encoding="utf-8")
     offenders = scan_stray_hex(tmp_path)
     assert list(offenders) == [tmp_path / "sub" / "deep.js"]
+
+
+# ---------------------------------------------------------------------------
+# 自己的版式 layout.css：不许重定义 base.css 已有的选择器
+# ---------------------------------------------------------------------------
+
+
+def test_redefining_a_base_selector_is_caught_and_a_new_one_is_not():
+    """「一家人」的底线：消费者自己的 css 可以加新选择器，不许改共享部件的长相。"""
+    from msui.testing import redefined_base_selectors
+
+    css = """
+    .nav { display: flex; }
+    button { border-radius: 0; }
+    .nav button:hover { color: var(--text); }
+    button { padding: 0; }
+    """
+    assert redefined_base_selectors(css) == ["button"], "同一条写两遍只报一次"
+
+
+def test_the_comparison_is_by_whole_selector_and_survives_formatting():
+    """写法差异（空白、组合符两侧空格、属性值引号、逗号分组、@media 里嵌着）
+    不能让重定义漏网；反过来按「整条选择器」比对，只撞类名不算。"""
+    from msui.testing import redefined_base_selectors
+
+    css = """
+    /* button { 注释里的不算 } */
+    .seg   button.on,.nav{ color: var(--text); }
+    @media (max-width: 700px) {
+      button.switch[aria-checked=true]::after { left: 0; }
+    }
+    .toolbar>*+* { margin: 0; }
+    .icon { width: 1px; }
+    .dot { width: 1px; }
+    @keyframes button { from { opacity: 0; } to { opacity: 1; } }
+    """
+    assert redefined_base_selectors(css) == [
+        ".seg button.on",
+        'button.switch[aria-checked=true]::after',
+        ".toolbar>*+*",
+    ]
+
+
+def test_every_selector_of_base_css_counts_as_taken():
+    """自证扫描没坏：把 base.css 自己当消费者文件喂进去，#22 交接清单里的
+    代表（含 @media 里嵌着的、伪元素的、分组的）全部被认出。"""
+    from msui.testing import redefined_base_selectors
+
+    hits = redefined_base_selectors(base_css_path().read_text(encoding="utf-8"))
+    for expected in (
+        "html",
+        "body",
+        "button",
+        "button:hover",
+        ".seg button",
+        ".grid tbody tr.sel",
+        "td.num",
+        "th.num",
+        ".chip.on",
+        ".search input",
+        "button.icon",
+        ".empty .icon",
+        "button.switch[aria-checked=true]::after",
+        ".dot::before",
+        "body.app .cols",
+        "progress::-webkit-progress-bar",
+    ):
+        assert expected in hits, f"{expected} 没被认作 base.css 已有选择器"
+    assert ".dot" not in hits and ".icon" not in hits and "from" not in hits
+
+
+def test_scan_reads_own_css_and_inline_style_but_skips_the_package_copies(tmp_path: Path):
+    """消费者页面目录：layout.css（或任意名）与 html 里的内联 <style> 都受检；
+    copy_assets 落下的三份副本不受检（base.css 副本当然「重定义」了全部）。"""
+    from msui.resources import ASSET_NAMES
+    from msui.testing import scan_base_redefinitions
+
+    for name in ASSET_NAMES:
+        (tmp_path / name).write_text("button { color: var(--text); }", encoding="utf-8")
+    (tmp_path / "layout.css").write_text(
+        ".nav { gap: 2px; }\n.seg button { padding: 0; }", encoding="utf-8"
+    )
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "extra.css").write_text(".card { padding: 0; }", encoding="utf-8")
+    (tmp_path / "index.html").write_text(
+        "<!-- 注释里的 <style>button {}</style> 不算 --><head><style>\n"
+        ".ln-ok { color: var(--ok); }\ndialog { width: 90%; }\n</style></head>"
+        "<p style='color: var(--muted)'>button { }</p>",
+        encoding="utf-8",
+    )
+    (tmp_path / "clean.html").write_text("<style>.mine { gap: 0; }</style>", encoding="utf-8")
+    (tmp_path / "app.js").write_text("const css = 'button {}';", encoding="utf-8")
+
+    assert scan_base_redefinitions(tmp_path) == {
+        tmp_path / "index.html": ["dialog"],
+        tmp_path / "layout.css": [".seg button"],
+        tmp_path / "sub" / "extra.css": [".card"],
+    }
+
+
+def test_layout_css_is_the_consumers_own_file_and_its_colours_stay_scanned(tmp_path: Path):
+    """layout.css 是消费者自己的、要入仓的文件：copy_assets 不落它、不碰它
+    （pages/.gitignore 与 ASSET_NAMES 由契约测试钉成同一份，所以也不会被忽略）；
+    它不在 hex 允许清单里——配色照旧只许 var(--token)，手写 hex 当场被抓。"""
+    from msui.resources import ASSET_NAMES, copy_assets
+    from msui.testing import LAYOUT_CSS_NAME
+
+    assert LAYOUT_CSS_NAME == "layout.css"
+    assert LAYOUT_CSS_NAME not in ASSET_NAMES
+    assert LAYOUT_CSS_NAME not in ALLOWED_HEX_FILE_NAMES
+
+    own = tmp_path / LAYOUT_CSS_NAME
+    own.write_text(".nav button.on::after { background: #db021d; }", encoding="utf-8")
+    assert copy_assets(tmp_path) == tmp_path
+    assert own.read_text(encoding="utf-8") == ".nav button.on::after { background: #db021d; }"
+    assert scan_stray_hex(tmp_path) == {own: ["#db021d"]}
+
+
+def test_the_redefinition_report_names_file_selector_and_the_way_out(tmp_path: Path):
+    from msui.testing import format_base_redefinitions
+
+    assert format_base_redefinitions({}) == ""
+    text = format_base_redefinitions({tmp_path / "layout.css": ["button", ".chip.on"]})
+    assert "layout.css" in text and "'button'" in text and "'.chip.on'" in text
+    assert "开票回 msui" in text
