@@ -61,8 +61,10 @@ def test_asset_datas_targets_bundle_dir():
     for src, dest in datas:
         assert dest == resources.BUNDLE_DIR
         assert Path(src).is_file()
-    # 逐文件列名的单一来源：两份 css 都必须登记在 ASSET_NAMES 里
-    assert set(resources.ASSET_NAMES) == {"tokens.css", "base.css"}
+    # 逐文件列名的单一来源：三份 css 都必须登记在 ASSET_NAMES 里——
+    # 官方浅色主题 tokens-light.css（票 #23）也随 copy_assets 一起落地
+    assert set(resources.ASSET_NAMES) == {"tokens.css", "base.css", "tokens-light.css"}
+    assert resources.TOKENS_LIGHT_CSS_NAME == "tokens-light.css"
 
 
 # ---------------------------------------------------------------------------

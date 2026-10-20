@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,8 @@ from msui import testing as msui_testing
 from msui.resources import (
     BASE_CSS_NAME,
     TOKENS_CSS_NAME,
+    TOKENS_LIGHT_CSS_NAME,
+    asset_path,
     base_css_path,
     parse_tokens,
     tokens_css_path,
@@ -256,6 +259,82 @@ def test_failure_message_names_the_pair_in_words(colors: dict[str, str]):
 
 
 # ---------------------------------------------------------------------------
+# 官方浅色主题 tokens-light.css（票 #23）：同一张登记表、同一套档位
+# ---------------------------------------------------------------------------
+
+LIGHT_SELECTOR = ':root[data-theme="light"]'
+
+
+@pytest.fixture(scope="module")
+def light_text() -> str:
+    return asset_path(TOKENS_LIGHT_CSS_NAME).read_text(encoding="utf-8")
+
+
+@pytest.fixture(scope="module")
+def light_colors(all_tokens: dict[str, str], light_text: str) -> dict[str, str]:
+    """浅色生效时页面上的那份 token：深色全集 + 浅色覆写（与层叠结果同构）。"""
+    return hex_tokens(merge_tokens(all_tokens, parse_tokens(light_text)))
+
+
+def test_light_theme_is_scoped_to_the_data_theme_switch_only(light_text: str):
+    """整份文件只有 `:root[data-theme="light"]` 一个规则块。
+
+    消费者 <link> 了它、但没打开开关时，页面必须与深色**一个像素不差**——
+    文件里但凡多出一个 `:root { … }` 块，就会悄悄改掉深色下的值。
+    """
+    without_comments = re.sub(r"/\*.*?\*/", "", light_text, flags=re.DOTALL)
+    selectors = [s.strip() for s in re.findall(r"([^{}]+)\{", without_comments)]
+    assert selectors == [LIGHT_SELECTOR]
+
+
+def test_light_theme_overrides_every_colour_token_and_invents_none(
+    all_tokens: dict[str, str], light_text: str
+):
+    """浅色只覆写 tokens.css 里已有的颜色 token，且一个不漏。
+
+    漏一个 = 浅色页面里混进一块深色值（比如一条深色的分隔线）；多一个 = 组件
+    样式吃不到它，白写。量值 token（间距、字号、列宽、字体族）与主题无关，
+    不在覆写范围里。
+    """
+    light = parse_tokens(light_text)
+    measures = {
+        name for name in NON_HEX_TOKENS
+        if not all_tokens[name].startswith("rgba(")
+    }
+    colour_tokens = set(all_tokens) - measures
+    assert set(light) == colour_tokens, (
+        f"浅色漏覆写：{sorted(colour_tokens - set(light))}；"
+        f"多出来的：{sorted(set(light) - colour_tokens)}"
+    )
+
+
+def test_every_registered_pair_in_light_theme_is_readable(light_colors: dict[str, str]):
+    """浅色过的是同一张 BASE_TOKEN_PAIRS、同一套档位——不为浅色另开一张宽松的表。"""
+    failures = contrast_failures(light_colors)
+    assert not failures, format_contrast_failures(failures, light_colors)
+
+
+def test_light_gate_really_goes_red_on_a_light_specific_regression(
+    light_colors: dict[str, str],
+):
+    """自证：把浅色的 on-brand 写成浅色的 --text（黑），闸门必须点名主按钮文字。
+
+    这正是票 #23 撞出来的那个缺口——红底黑字——在闸门里的样子。
+    """
+    broken = {**light_colors, "on-brand": light_colors["text"]}
+    failed = {(p.foreground, p.background) for p in contrast_failures(broken)}
+    assert ("on-brand", "brand") in failed
+
+
+def test_text_on_brand_stays_light_in_the_light_theme(light_colors: dict[str, str]):
+    """浅色下 --text 是深色字，--on-brand 仍是浅色字：两者必须分家。"""
+    assert light_colors["on-brand"] != light_colors["text"]
+    assert relative_luminance(light_colors["on-brand"]) > relative_luminance(
+        light_colors["text"]
+    )
+
+
+# ---------------------------------------------------------------------------
 # 登记表结构约定
 # ---------------------------------------------------------------------------
 
@@ -362,6 +441,35 @@ def test_control_threshold_is_exported_as_its_own_knob():
     assert "CONTROL_MINIMUM" in msui_testing.__all__
 
 
+def test_text_on_brand_goes_through_its_own_token_and_is_registered(
+    all_tokens: dict[str, str],
+):
+    """品牌色上的文字走 --on-brand（票 #23）：tokens 有它、base.css 主按钮吃它、
+    登记表在文字档盯着它对 brand / brand-down 两种底。
+
+    深色下 --on-brand 与 --text 同值——这是「主按钮外观与现状等价」的证据，
+    已发版的三个消费者升级后一个像素都不该变。浅色主题下 --text 变黑，
+    还写 var(--text) 的话就是红底黑字，所以这里不能再借道 --text。
+    """
+    assert all_tokens.get("on-brand") == all_tokens["text"], (
+        "深色下 --on-brand 必须与 --text 同值：主按钮外观与 0.9.0 等价"
+    )
+    base = base_css_path().read_text(encoding="utf-8")
+    primary = base[base.index("button.primary, .btn.primary {"):]
+    primary = primary[: primary.index("}")]
+    assert "color: var(--on-brand)" in primary, "主按钮文字应走 --on-brand"
+    assert "var(--text)" not in primary, "主按钮文字不许再借道 --text"
+    registered = {
+        (p.foreground, p.background)
+        for p in BASE_TOKEN_PAIRS
+        if p.minimum == TEXT_MINIMUM
+    }
+    assert {("on-brand", "brand"), ("on-brand", "brand-down")} <= registered
+    assert ("text", "brand") not in registered, (
+        "主按钮文字已不是 --text：留着这条等于登记一对页面上不存在的组合"
+    )
+
+
 def test_error_and_brand_each_have_their_own_registered_combo():
     """error 与 brand 是两个变量、分立登记，永不共用同一条。"""
     error_pairs = [p for p in BASE_TOKEN_PAIRS if p.foreground == "error"]
@@ -408,7 +516,9 @@ def test_package_shipped_css_has_no_stray_hex():
     base.css 承诺色彩只经 var(--…) 引用——这条就是盯着它的那双眼睛。
     """
     package_dir = tokens_css_path().parent
-    offenders = scan_stray_hex(package_dir, allowed_names=(TOKENS_CSS_NAME,))
+    offenders = scan_stray_hex(
+        package_dir, allowed_names=(TOKENS_CSS_NAME, TOKENS_LIGHT_CSS_NAME)
+    )
     assert not offenders, format_stray_hex(offenders)
 
 
@@ -429,12 +539,19 @@ def test_scan_catches_every_hex_shape(tmp_path: Path):
 
 
 def test_scan_skips_the_three_allowed_copies_by_default(tmp_path: Path):
-    """允许清单 = tokens.css 副本 + base.css 副本 + override.css。
+    """允许清单 = tokens.css / tokens-light.css / base.css 三份副本 + override.css。
 
-    消费者把包里两份 css 拷进自己的静态目录、再放一份改色的 override.css，
-    这三份里合法地含着 hex；包内文件的干净由包自己的 CI 把关，不用消费者管。
+    copy_assets 把包里三份 css 落进消费者的页面目录、消费者再放一份改色的
+    override.css，这几份里合法地含着 hex；包内文件的干净由包自己的 CI 把关，
+    不用消费者管。tokens-light.css 不在清单里的话，消费者升级之后闸门当场红
+    在一份不归他管的文件上。
     """
-    assert set(ALLOWED_HEX_FILE_NAMES) == {TOKENS_CSS_NAME, BASE_CSS_NAME, "override.css"}
+    assert set(ALLOWED_HEX_FILE_NAMES) == {
+        TOKENS_CSS_NAME,
+        TOKENS_LIGHT_CSS_NAME,
+        BASE_CSS_NAME,
+        "override.css",
+    }
     for name in ALLOWED_HEX_FILE_NAMES:
         (tmp_path / name).write_text(":root { --brand: #0055aa; }", encoding="utf-8")
     assert scan_stray_hex(tmp_path) == {}

@@ -45,6 +45,9 @@ def test_wheel_contains_msui_package(tmp_path):
     # 换构建后端或改打包配置时资产悄悄掉出去会当场红。
     assert "msui/tokens.css" in names, f"wheel 里没有 tokens.css，实际内容：{names}"
     assert "msui/base.css" in names, f"wheel 里没有 base.css，实际内容：{names}"
+    assert "msui/tokens-light.css" in names, (
+        f"wheel 里没有 tokens-light.css，实际内容：{names}"
+    )
 
     # PyInstaller hook 也必须进 wheel：hook-msui.py 文件名带连字符、不是可
     # import 的模块，构建后端会不会收它同样是实测行为——掉出去的话下游冻结

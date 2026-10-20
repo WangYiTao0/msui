@@ -330,6 +330,20 @@ def test_dialog_is_a_centered_card_with_a_width_cap():
     assert re.search(r"padding: var\(--space-\d\)", dialog), "内衬必须走间距档"
 
 
+def test_open_dialog_pins_itself_to_the_viewport_explicitly():
+    """打开的对话框显式 `position: fixed; inset: 0`（票 #23）。
+
+    margin auto 四向居中的前提是元素被钉在整个视口上；只靠 UA 给的那一份，
+    Chrome 140 实测对话框贴在视口顶上（WebView2 同是 Chromium）。写在
+    `dialog[open]` 上而不是 `dialog` 上：关着的对话框一条声明都不多拿；同样
+    一个 display 都不许写（「关着就不见」只靠 UA 的 display: none）。
+    """
+    opened = rule("dialog[open]")
+    assert "position: fixed" in opened
+    assert "inset: 0" in opened
+    assert "display" not in opened
+
+
 def test_dialog_radius_is_the_same_step_as_cards():
     """圆角与卡片同一档——档位从 .card 那条规则里取，不许两边各写各的数。"""
     match = re.search(r"border-radius: (\d+px)", rule(".card"))

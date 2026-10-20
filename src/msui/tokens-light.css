@@ -1,0 +1,83 @@
+/*
+ * 官方浅色主题：**opt-in**，只在 `:root[data-theme="light"]` 下覆写 tokens.css
+ * 里的同名颜色 token，组件样式（base.css）一条不改。
+ *
+ * 启用（消费者页面两步，详见 README §4）：
+ *   1. <head> 里在 base.css 之后加 <link rel="stylesheet" href="tokens-light.css">；
+ *   2. 打开开关：document.documentElement.dataset.theme = "light"
+ *      （关掉就是删掉这个属性；记不记住选择由页面自己决定，比如 localStorage）。
+ * 只 <link> 不开开关时，这份文件一条声明都不生效，页面与深色一个像素不差。
+ * 本文件只许有这一个规则块（有测试盯着）——多出一个 `:root { … }` 就会悄悄
+ * 改掉深色下的值。
+ *
+ * 来源：第三个消费者（包装排产小程序）的 prototype 实战值，回收进 msui（票 #23）。
+ *
+ * **白底上的对比度**：与 tokens.css 同一套档位（文字 4.5 / 控件 3.0 / 分隔线
+ * 1.3），过的是同一张 testing.BASE_TOKEN_PAIRS，底是 --card #ffffff 与
+ * --win #f6f6f7（数字用 msui.testing.contrast_ratio 实测）：
+ *   --text #18181b 对白 17.7 · --text-dim #52525b 7.7 · --muted #6b6b76 5.3
+ *   --border #c6c6cc 对白 1.7、对 --track #e4e4e8 1.34：分隔线档卡在**对轨道**
+ *     这一条上（prototype 初版的 #d9d9de 对 track 只有 1.11，过不了）
+ *   --brand 不变 #db021d：对白 5.2，主按钮上的白字 --on-brand 同一个数；
+ *     对 --track 4.1（进度条填充，控件档）
+ *   状态色深一档才压得住白底：warn #b45309 · info #1d4ed8 · ok #15803d ·
+ *     error #d32020。紧的是 error：对 --card-hover #f3f3f5 4.74、对 --win 4.86
+ *     （prototype 初版的 #dc2626 在这两个底上只有 4.36 / 4.47，闸门跑出来的）
+ * 改这些值时请保持同档搭配仍然达标——tests/test_testing.py 对浅色跑同一道闸门。
+ *
+ * 半透明晕染（*-bg、*-wash、brand-tint*、wash、scrim）与深色同一性质、不承担
+ * 「看得清」的职责：深色下是「提亮」，浅色下换成状态色 / 黑色的 4%～12% 浅染，
+ * 遮罩换成文字色的 45%。
+ *
+ * 换品牌色的消费者注意：这里重新声明了 --brand / --brand-down，选择器
+ * `:root[data-theme="light"]` 比 override.css 的 `:root` 更具体——浅色下 override
+ * 改的品牌色会被这里压回红色。要两个主题都换色，override 里写
+ * `:root, :root[data-theme="light"] { --brand: …; }`。
+ *
+ * 已知不跟走的一处：Windows 原生标题栏由 msui.chrome 在开窗时染成 tokens.css
+ * 的 --win（深色），页面切到浅色时标题栏不会跟着变。
+ */
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* ---- 底色 ---- */
+  --bg: #e6e6ea;
+  --win: #f6f6f7;
+  --card: #ffffff;
+  --card-hover: #f3f3f5;
+  --track: #e4e4e8; /* 凹陷槽：比卡片暗一档，描边 --border 负责画出边界（同深色） */
+
+  /* ---- 边框 ---- */
+  --border: #c6c6cc;
+  --border-hover: #b8b8c0;
+
+  /* ---- 文字 ---- */
+  --text: #18181b;
+  --text-dim: #52525b;
+  --muted: #6b6b76;
+
+  /* ---- 品牌色：与深色同值；品牌底上的字仍是白的 ---- */
+  --brand: #db021d;
+  --brand-down: #b8021a;
+  --on-brand: #ffffff;
+
+  /* ---- 状态色：深一档 ---- */
+  --warn: #b45309;
+  --info: #1d4ed8;
+  --ok: #15803d;
+  --error: #d32020;
+  --error-bg: rgba(211, 32, 32, 0.08);
+  --error-strip-border: rgba(211, 32, 32, 0.30);
+  --error-wash: rgba(211, 32, 32, 0.12);
+
+  /* ---- 半透明晕染 ---- */
+  --warn-bg: rgba(180, 83, 9, 0.10);
+  --info-bg: rgba(29, 78, 216, 0.10);
+  --ok-bg: rgba(21, 128, 61, 0.10);
+  --brand-tint: rgba(219, 2, 29, 0.10);
+  --brand-tint-weak: rgba(219, 2, 29, 0.04);
+  --brand-tint-border: rgba(219, 2, 29, 0.30);
+  --wash: rgba(0, 0, 0, 0.05);
+  --scrim: rgba(24, 24, 27, 0.45);
+}

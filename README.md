@@ -403,9 +403,10 @@ if __name__ == "__main__":
 
 要点：
 
-- `copy_assets` **无条件覆盖**地把 `tokens.css` + `base.css` 落进页面目录并返回
-  该开窗的目录——开窗一律用返回值，别写死 `page_dir`；
-- 这两份 css 不入仓、不手改（`pages/.gitignore` 把它们排除掉）；
+- `copy_assets` **无条件覆盖**地把 `tokens.css` + `base.css` + `tokens-light.css`
+  落进页面目录并返回该开窗的目录——开窗一律用返回值，别写死 `page_dir`；
+  `tokens-light.css` 是可选的浅色主题（§4），页面不引用它就不起任何作用；
+- 这几份 css 不入仓、不手改（`pages/.gitignore` 把它们排除掉）；
 - 钉版本的官方姿势就是上面的 `MSUI_PINNED` 常量 + 横幅断言：**钉死常量证明
   「产物带的确实是钉的这一版」，改读 `importlib.metadata` 只是回显装了哪版、
   永远绿**——升级 msui 时改两处（requirements 的 wheel URL + 这个常量），
@@ -803,6 +804,39 @@ if __name__ == "__main__":
 - 防游离扫描的允许清单已含 `override.css`（改色值就是它的本职），闸门的对比度
   检查吃的是合成后的结果——override 改了什么、闸门就按什么算，压不住红。
 
+### 浅色主题（opt-in）
+
+msui 自带一套官方浅色：`tokens-light.css`，`copy_assets` 每次启动和另外两份
+一起落进页面目录。它只在 `:root[data-theme="light"]` 下覆写同名颜色 token，
+组件样式一条不改——**不开开关就一个像素不变**，默认仍是深色。启用两步：
+
+1. `<head>` 里在 `base.css` 之后加一行：
+
+   ```html
+   <link rel="stylesheet" href="tokens-light.css">
+   ```
+
+2. 页面脚本里打开开关（关掉就是删掉这个属性；要不要记住用户的选择、记在
+   哪——比如 `localStorage`——由页面自己决定）：
+
+   ```js
+   document.documentElement.dataset.theme = "light";   // 切到浅色
+   delete document.documentElement.dataset.theme;      // 回到深色
+   ```
+
+要知道的四条：
+
+- 品牌色上的文字（主按钮文案这类）走 `--on-brand`，**不要写 `var(--text)`**——
+  浅色下 `--text` 是黑的，红底黑字；
+- 同时有 `override.css` 换品牌色的话：浅色那份重新声明了 `--brand`，而
+  `:root[data-theme="light"]` 比 `:root` 更具体，浅色下会把 override 的品牌色
+  压回红色。两个主题都要换色就写 `:root, :root[data-theme="light"] { --brand: …; }`；
+- 浅色的配色过的是同一张 `BASE_TOKEN_PAIRS`、同一套档位（msui 自己的 CI 把过
+  关）；页面追加了自己的 `MY_PAIRS` 时，闸门也要对浅色再跑一遍：把
+  `asset_path(TOKENS_LIGHT_CSS_NAME)` 解析出来，用 `gate.merge_tokens` 合到深色
+  tokens 上（有 override 再合 override），同一张表过一遍；
+- 已知限制：Windows 原生标题栏开窗时染成深色的 `--win`，页面切浅色时它不跟着变。
+
 ## 5. 闸门测试
 
 自己仓里放一份下面的文件，pytest 就有两条样式闸门：配色对比度（WCAG 档位）
@@ -854,7 +888,8 @@ spec 对 msui **零资源配置**——样式与版本元数据由包自带的 h
 # examples/minimal/app.spec
 # -*- mode: python ; coding: utf-8 -*-
 # 最小消费者的 PyInstaller spec。关键点：对 msui 的资源与元数据**零配置**——
-# tokens.css / base.css / dist-info 全由 msui 包自带的 pyinstaller40 hook 收齐。
+# tokens.css / base.css / tokens-light.css / dist-info 全由 msui 包自带的
+# pyinstaller40 hook 收齐。
 # datas 只声明自己持有的页面目录。
 import os
 
@@ -870,13 +905,13 @@ a = Analysis(
     noarchive=False,
 )
 
-# 开发机上冒烟落地过的 tokens.css / base.css 副本（gitignored、但在盘上）
-# 会被 pages/ 整目录收集顺手带进产物——纯冗余：运行时 copy_assets 每次启动
-# 都无条件覆盖，产物里那两份副本永远不会被用到。按目的地路径剔掉；CI 的
-# 干净 checkout 本来就没有它们，此过滤不改变 CI 产物。
+# 开发机上冒烟落地过的 tokens.css / base.css / tokens-light.css 副本
+# （gitignored、但在盘上）会被 pages/ 整目录收集顺手带进产物——纯冗余：运行时
+# copy_assets 每次启动都无条件覆盖，产物里那几份副本永远不会被用到。按目的地
+# 路径剔掉；CI 的干净 checkout 本来就没有它们，此过滤不改变 CI 产物。
 def _is_landed_css(dest: str) -> bool:
     parts = dest.replace("\\", "/").split("/")
-    return parts[0] == "pages" and parts[-1] in ("tokens.css", "base.css")
+    return parts[0] == "pages" and parts[-1] in ("tokens.css", "base.css", "tokens-light.css")
 
 a.datas = [entry for entry in a.datas if not _is_landed_css(entry[0])]
 
@@ -933,12 +968,13 @@ null 被直接 `getComputedStyle`）时**不中断整场**——异常文本当�
 使然，不为失败开小灶）——所以探针尽量写成 null-safe（照上面 `.display`
 那段先判元素再取样式），元素缺席时报出的是 `missing` 而不是一串异常文本。
 
-msui 落进来的两份样式副本要挡在 git 外——`pages/.gitignore` 写这两行
+msui 落进来的三份样式副本要挡在 git 外——`pages/.gitignore` 写这三行
 （仓里的唯一样式来源是 msui 包，副本入了仓就是漂移源）：
 
 ```
 tokens.css
 base.css
+tokens-light.css
 ```
 
 ## 版本标记：产物里读得出带的是哪版 msui
@@ -989,12 +1025,15 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
    serve_dir = msui.resources.copy_assets(page_dir()) →
    msui.shell.run(serve_dir / "index.html", title="应用名")。开窗一律用
    copy_assets 的返回值。
-3. 页面 <head> 依次相对引用 tokens.css、base.css。这两份不入仓、不手改，
-   由 copy_assets 每次启动无条件覆盖落下（pages/.gitignore 排除它们）。
+3. 页面 <head> 依次相对引用 tokens.css、base.css。copy_assets 每次启动无条件
+   覆盖落下这两份外加可选的 tokens-light.css，三份都不入仓、不手改
+   （pages/.gitignore 排除它们）。
 4. HTML 直接写语义化标签（button/input/table/a/h1…），不写自定义配色；任何
    颜色只允许 var(--token) 引用，禁止手写十六进制色值。
 5. 换色（默认不需要）：pages/ 里加 override.css，只覆写 :root 里同名 token
-   变量值，并在 base.css 之后 <link> 它。
+   变量值，并在 base.css 之后 <link> 它。浅色主题（默认不开）：base.css 之后
+   <link> tokens-light.css，再给 <html> 设 data-theme="light"；品牌色底上的
+   文字用 var(--on-brand)，不用 var(--text)。
 6. 测试加两条样式闸门（照抄 msui README 的 test_style_gate.py）：
    contrast_failures 对比度 + scan_stray_hex 防游离色值。
 7. PyInstaller spec 里对 msui 零资源配置（包自带 hook 收齐样式与元数据），

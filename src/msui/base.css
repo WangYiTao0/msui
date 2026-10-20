@@ -77,10 +77,11 @@ button:disabled, .btn:disabled {
 button:disabled:hover, .btn:disabled:hover {
   color: var(--text-dim); background: transparent;
 }
-/* 主按钮：品牌色底，一个界面里同时最多一个 */
+/* 主按钮：品牌色底，一个界面里同时最多一个。文字走 --on-brand（品牌色上的
+   文字色），不借道 --text：浅色主题下 --text 是黑的，借道就成了红底黑字。 */
 button.primary, .btn.primary {
   background: var(--brand); border-color: var(--brand);
-  color: var(--text); font-weight: 600;
+  color: var(--on-brand); font-weight: 600;
 }
 button.primary:hover, .btn.primary:hover { background: var(--brand-down); }
 
@@ -256,6 +257,12 @@ dialog {
   border-radius: 10px;
   padding: var(--space-4);
 }
+/* 打开时显式钉在整个视口上：上面那条 margin auto 四向居中，前提是元素四边
+   都贴着视口（fixed + inset 0）。理论上 UA 的模态样式会给，但 Chrome 140 实测
+   只靠 UA 时对话框贴在视口顶上、不居中（WebView2 同是 Chromium）——所以显式
+   写出来，不赌 UA。只挂在 [open] 上，关着的对话框不多拿一条声明；这里同样
+   一个 display 都不许写（理由见上面那条的第二个坑）。 */
+dialog[open] { position: fixed; inset: 0; }
 dialog::backdrop { background: var(--scrim); }
 /* 对话框内部的竖向节奏与卡片同一档（标题、说明段、按钮行之间）。按钮行直接
    挂 .actions，不另造一套：`.actions > * + *` 带一个类选择器，这条只有类型

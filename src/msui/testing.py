@@ -50,7 +50,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .resources import BASE_CSS_NAME, TOKENS_CSS_NAME
+from .resources import BASE_CSS_NAME, TOKENS_CSS_NAME, TOKENS_LIGHT_CSS_NAME
 
 __all__ = [
     "ALLOWED_HEX_FILE_NAMES",
@@ -270,9 +270,12 @@ BASE_TOKEN_PAIRS: tuple[TokenPair, ...] = (
     TokenPair("状态色 info 文字/链接（win 底）", "info", "win", TEXT_MINIMUM),
     TokenPair("状态色 ok 文字（win 底）", "ok", "win", TEXT_MINIMUM),
     TokenPair("状态色 error 文字（win 底）", "error", "win", TEXT_MINIMUM),
-    # ---- 主按钮（4.5）：text 画在 brand 底上；hover 态换 brand-down 底 ----
-    TokenPair("主按钮文字 text（brand 底）", "text", "brand", TEXT_MINIMUM),
-    TokenPair("主按钮文字 text（brand-down 底）", "text", "brand-down", TEXT_MINIMUM),
+    # ---- 主按钮（4.5）：on-brand 画在 brand 底上；hover 态换 brand-down 底 ----
+    # 主按钮文字从前借道 --text，深色下没差别；浅色主题里 --text 变黑，于是
+    # 单列 --on-brand。登记的是页面上真实存在的那一对——--text 已不画在品牌底上，
+    # 所以那两条随之换成 on-brand，不并存（并存等于登记一对不存在的组合）。
+    TokenPair("主按钮文字 on-brand（brand 底）", "on-brand", "brand", TEXT_MINIMUM),
+    TokenPair("主按钮文字 on-brand（brand-down 底）", "on-brand", "brand-down", TEXT_MINIMUM),
     # ---- 图形控件（3.0）：brand 这块颜色四周挨着的每一种底 ----
     # 一个前景可以同时有好几条真实相邻关系，各自单独登记；判断标准是「页面上
     # 这两块颜色是不是边挨边」，不是「哪条数字最紧」。brand 有三条：
@@ -349,11 +352,12 @@ SCANNED_SUFFIXES = (".html", ".css", ".js")
 
 OVERRIDE_CSS_NAME = "override.css"
 
-# 默认允许含 hex 的文件名：包内两份 css 的**副本**（消费者拷进自己静态目录
-# 的那两份——原件的干净由包自己的测试把关，消费者不必重复负责），加上消费
-# 者自己的换色 override.css（它的本职就是用新 hex 覆写 token 值）。
+# 默认允许含 hex 的文件名：包内三份 css 的**副本**（copy_assets 落进消费者
+# 页面目录的那三份——原件的干净由包自己的测试把关，消费者不必重复负责），
+# 加上消费者自己的换色 override.css（它的本职就是用新 hex 覆写 token 值）。
 ALLOWED_HEX_FILE_NAMES: tuple[str, ...] = (
     TOKENS_CSS_NAME,
+    TOKENS_LIGHT_CSS_NAME,
     BASE_CSS_NAME,
     OVERRIDE_CSS_NAME,
 )
