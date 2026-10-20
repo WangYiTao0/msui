@@ -3,7 +3,8 @@
  * 引用，本文件不许出现字面色值（十六进制 / rgb() / hsl()），有测试盯着。
  *
  * 覆盖：排版、按钮、操作行、输入框、表单行、进度条、表格、卡片、模态对话框、
- * 提示条、日志区、空态、分段选择、徽章、进场动效；外加 opt-in 的应用式版式
+ * 提示条、日志区、空态、分段选择、徽章、进场动效、列表页 / 设置页部件（数据
+ * 网格、工具条、筛选片、搜索框、图标按钮、开关、状态点）；外加 opt-in 的应用式版式
  * （`<body class="app">`：顶栏 / 多栏 / 状态栏，不挂开关的小工具窗一个像素不变）。
  * 两条原则：
  *   1. 语义化标签（button / input / table…）直接给默认样式，裸 HTML 就长对；
@@ -406,6 +407,161 @@ dialog > * + * { margin-top: var(--space-3); }
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
+
+/* ======== 列表页 / 设置页部件 ========
+   数据网格、工具条 + 筛选片、搜索框、开关、图标按钮、状态点。与 .seg / .pill
+   同一性质：是部件不是版式，小窗与应用式（body.app）都能用；全是新类名，旧页面
+   命中不到。凡是 `xx button` / `button.xx` 形态、要压过通用按钮 hover 的，都靠
+   **写在通用按钮规则之后**取胜（同 .seg，有测试盯着顺序）。 */
+
+/* ---- 数据网格 .grid：横竖滚 + 粘表头 + 数字右对齐 + 选中行 ----
+   `<div class="grid"><table>…</table></div>`——外框自己滚、限高 46vh，宽表不把
+   整窗撑出横滚条；里面就是一张普通 <table>，表头 / 单元格 / 悬停沿用上面表格
+   那一节。外框画成一张卡（底 / 描边 / 圆角同 .card）。
+   - 表头 position: sticky 钉在外框顶上，自带不透明 --card 底：不给底的话滚过去
+     的行会从表头底下透出来；
+   - 单元格不折行（宽表靠横滚读，折行之后一行数据变两三行高，眼睛对不上列），
+     数字等宽；数字列给 td / th 挂 .num 右对齐，个位对个位；
+   - 选中行挂 tr.sel：--wash 提亮 + 左侧 3px 品牌色条。色条用 inset 阴影画，
+     不占列宽、不推动列对齐。
+   要更高（占满主区）就覆写 max-height，别在这里写死一个「刚好合某一扇窗」的数。 */
+.grid {
+  overflow: auto; max-height: 46vh;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--card);
+}
+.grid table { font-size: 12px; }
+.grid th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--card); white-space: nowrap;
+}
+.grid td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.grid tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; }
+.grid tbody tr.sel { background: var(--wash); box-shadow: inset 3px 0 0 var(--brand); }
+
+/* ---- 工具条 .toolbar + 筛选片 .chip ----
+   `<div class="toolbar"><button class="chip on">全部<span class="n">128</span></button>
+   … <label class="search">…</label><span class="grow"></span><button>导出</button></div>`
+   一行排开、垂直居中、窄窗折行；右推用现成的 .grow。最后那条归零与 .actions /
+   .field 是同一个先例：`<div class="card toolbar">` 整卡即一条时，`.card > * + *`
+   与 `.toolbar > * + *` 同分 (0,1,1)，靠写在后面取胜，否则第二个起的控件带
+   margin-top、高低不齐。
+
+   筛选片是胶囊形的按钮：当前项挂 .on（--wash 提亮、字变 --text 加粗，与 .seg
+   的当前项同一套），右侧 .n 是计数（弱化字、数字等宽）。多选还是单选由页面定；
+   单选时把 aria-pressed 一起写对。`.chip.on` 与 `.chip:hover` 同分 (0,2,0)，
+   当前项被悬停时靠写在后面保住提亮底。 */
+.toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+}
+.toolbar > * + * { margin-top: 0; }
+.chip {
+  font-size: 12px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--card); color: var(--text-dim);
+}
+.chip:hover { background: var(--card-hover); color: var(--text); }
+.chip.on {
+  background: var(--wash); border-color: var(--border-hover);
+  color: var(--text); font-weight: 600;
+}
+.chip .n {
+  margin-left: var(--space-1); font-weight: 400;
+  color: var(--muted); font-variant-numeric: tabular-nums;
+}
+
+/* ---- 搜索框 .search：放大镜 + 无框输入 + 可选的清除叉 ----
+   `<label class="search"><svg…/><input type="search" placeholder="搜索…">
+   <button class="icon" type="button" aria-label="清除" hidden>…</button></label>`
+   与总程序的搜索框同一副长相。框画在 label 上（底 / 描边 / 圆角与输入框同档），
+   里面的 input 去掉自己的框；焦点落进来时整个框换 hover 边。放大镜 svg 写
+   stroke="currentColor"，吃这里的 --muted。
+   `.search input`（0,1,1）与 `input:focus`（0,1,1）同分，**靠写在它后面取胜**
+   （有测试盯着顺序）——不然输入框一获焦就在框里再画一圈边。
+   原生 type=search 自带的清除叉是引擎画的浅灰色块、不吃 token，摘掉，要清除
+   就放一颗 button.icon（有内容时 hidden = false）。 */
+.search {
+  display: flex; align-items: center; gap: var(--space-2);
+  min-width: 240px; padding: 5px 10px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--muted);
+  transition: border-color 150ms ease-out;
+}
+.search:focus-within { border-color: var(--border-hover); }
+.search input {
+  flex: 1; min-width: 0; padding: 0; line-height: 20px;
+  border: 0; background: none; color: var(--text);
+}
+.search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+/* ---- 图标按钮 button.icon：只放一个图标的正方形按钮 ----
+   `<button class="icon" aria-label="上移"><svg viewBox="0 0 16 16" fill="none"
+   stroke="currentColor" …>…</svg></button>`——边框、底、hover 变亮、按下回弹
+   全沿用通用按钮，这里只把它压成 28px 正方形、内衬归零。
+   - 图标**一律内联 svg + currentColor**，不用 Unicode 箭头 / 符号字：`↥` `⤒`
+     这类字形 Windows 的 Segoe UI 里没有，会掉成方块或别的字体（推断，Mac 上
+     验不了——所以干脆不赌）。aria-label 写明动作，屏幕阅读器读的是它；
+   - **按钮自己不写 display**（收放靠 hidden，同 .notice）：居中交给 svg——成块、
+     margin auto，按钮内容在 Chromium / WebKit 里本来就竖向居中；
+   - 搜索框里的清除叉小一号、不要框。
+   `.empty .icon` 是空态里那颗大图标（另一回事，不是按钮），别把图标按钮放进
+   .empty 里——那条 (0,2,0) 会把它的字号与下边距改掉。 */
+button.icon { width: 28px; height: 28px; padding: 0; }
+button.icon > svg { display: block; margin: auto; width: 16px; height: 16px; }
+.search button.icon { width: 20px; height: 20px; border: 0; }
+
+/* ---- 开关 button.switch：设置页的「开 / 关」 ----
+   `<button class="switch" role="switch" aria-checked="false" aria-label="自动备份"></button>`
+   页面点一下把 aria-checked 在 "true" / "false" 之间翻（长相只认这一个属性，
+   读屏也只认它，两边不会对不上）。34×20 胶囊，滑块是 ::after。
+   - 关态是**凹陷槽**，与进度条同一套：轨道 --track、一圈 --border 描边画出边界
+     （border 对 track / card / win 都已在分隔线档登记），滑块 --text-dim——
+     滑块就是「现在是关」的那个信号，它对轨道过控件档 3.0（深 7.67、浅 6.1）。
+     不照抄参考实现的「--border-hover 轨道 + --on-brand 滑块」：那一对浅色下只
+     有 1.97:1；
+   - 开态整块 --brand、滑块 --on-brand（对 brand 已在文字档登记），brand 对
+     card / win 的控件档也登记着；
+   - hover 只把关态的边换成 --border-hover；**开态 hover 不换 --brand-down**：
+     它对深色 card 只有 2.53:1，掉出控件档。`button.switch:hover` 与开态那条
+     同分 (0,2,1)，开态写在后面才压得住；两条都写在通用按钮之后，才盖得掉
+     `button:hover` 那块 --wash 底；
+   - 按钮自己不写 display（收放靠 hidden）；滑块滑动与轨道变色是 transition，
+     「减少动态效果」下由静止段的通配符基线停掉（::after 也在它的射程里）。 */
+button.switch {
+  position: relative; flex-shrink: 0; vertical-align: middle;
+  width: 34px; height: 20px; padding: 0; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--track);
+  transition: background 150ms ease-out, border-color 150ms ease-out;
+}
+button.switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 999px;
+  background: var(--text-dim);
+  transition: transform 150ms ease-out, background 150ms ease-out;
+}
+button.switch:hover { background: var(--track); border-color: var(--border-hover); }
+button.switch[aria-checked="true"] { background: var(--brand); border-color: var(--brand); }
+button.switch[aria-checked="true"]::after {
+  background: var(--on-brand); transform: translateX(14px);
+}
+
+/* ---- 状态点 .dot：一颗 7px 圆点，报行 / 项的状态 ----
+   `<span class="dot ok"></span>已同步`，也可以把字包进去：
+   `<span class="dot error">失败</span>`。裸 .dot 是中性 --muted 点，四个状态与
+   .pill / .notice 同一套名字，点走同名实色（对 card / win 都在文字档登记着，
+   比圆点要的控件档 3.0 还高一档）。
+   点画在 ::before 上、**.dot 本体一个 display 都不写**：参考实现给本体写
+   display: inline-block 撑出宽高，那会盖掉 hidden（小窗没有 body.app [hidden]
+   兜底）；挪到伪元素上，本体保持行内、hidden 照常收得起来。 */
+.dot::before {
+  content: ""; display: inline-block; vertical-align: 1px;
+  width: 7px; height: 7px; border-radius: 999px; margin-right: 7px;
+  background: var(--muted);
+}
+.dot.ok::before { background: var(--ok); }
+.dot.warn::before { background: var(--warn); }
+.dot.info::before { background: var(--info); }
+.dot.error::before { background: var(--error); }
 
 /* ---- 应用式版式（opt-in）：<body class="app"> 开启，整窗即容器 ----
    上面那套「body 就是容器」是给 560×520 小工具窗的：内容列停在

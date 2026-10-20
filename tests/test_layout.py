@@ -876,6 +876,9 @@ def test_app_focus_ring_is_visible_and_token_coloured():
 # 底只有 card / win 两种：部件要么摆在窗底上（顶栏、状态栏），要么摆在卡片里；
 # 半透明的 --wash / --*-bg 叠在它们上面，可读性由透出来的实色底承担（与 .notice
 # 同一惯例）。
+# 状态点 .dot 的四个状态，名字与 .pill / .notice 同一套。
+DOT_STATES = ("ok", "warn", "info", "error")
+
 WIDGET_PAIRS = (
     (".seg", "border", "card"),
     (".seg", "border", "win"),
@@ -891,6 +894,41 @@ WIDGET_PAIRS = (
     ("body.app .rail", "border", "win"),
     ("body.app :focus-visible", "info", "win"),
     ("body.app :focus-visible", "info", "card"),
+    # ---- 票 #22：列表页 / 设置页部件 ----
+    (".grid", "border", "card"),
+    (".grid", "border", "win"),
+    (".grid tbody tr.sel", "brand", "card"),
+    (".chip", "text-dim", "card"),
+    (".chip", "border", "card"),
+    (".chip", "border", "win"),
+    (".chip:hover", "text", "card-hover"),
+    (".chip.on", "text", "card"),
+    (".chip.on", "text", "win"),
+    (".chip.on", "border-hover", "card"),
+    (".chip.on", "border-hover", "win"),
+    (".chip .n", "muted", "card"),
+    (".search", "border", "card"),
+    (".search", "border", "win"),
+    (".search", "muted", "card"),
+    (".search:focus-within", "border-hover", "card"),
+    (".search:focus-within", "border-hover", "win"),
+    (".search input", "text", "card"),
+    # 开关两态：关态描边两侧（外 card / win、内 track）+ 滑块对轨道；开态品牌块
+    # 对外侧底 + 滑块对品牌色；hover 换的那圈边同样两侧都登记。
+    ("button.switch", "border", "card"),
+    ("button.switch", "border", "win"),
+    ("button.switch", "border", "track"),
+    ("button.switch::after", "text-dim", "track"),
+    ("button.switch:hover", "border-hover", "card"),
+    ("button.switch:hover", "border-hover", "win"),
+    ("button.switch:hover", "border-hover", "track"),
+    ('button.switch[aria-checked="true"]', "brand", "card"),
+    ('button.switch[aria-checked="true"]', "brand", "win"),
+    ('button.switch[aria-checked="true"]::after', "on-brand", "brand"),
+    (".dot::before", "muted", "card"),
+    (".dot::before", "muted", "win"),
+    *((f".dot.{s}::before", s, "card") for s in DOT_STATES),
+    *((f".dot.{s}::before", s, "win") for s in DOT_STATES),
 )
 
 COLOUR_PROPS_RE = re.compile(
@@ -952,3 +990,231 @@ def test_fade_in_is_stopped_by_reduced_motion():
     assert "animation: none !important" in baseline.group(1), (
         "通配符基线不停 animation 的话 .fade-in 照跑（静止段里别的规则停的是伪元素）"
     )
+
+
+# ---------------------------------------------------------------------------
+# 列表页 / 设置页部件（票 #22）：数据网格 .grid、工具条 .toolbar + 筛选片 .chip、
+# 搜索框 .search、开关 button.switch、图标按钮 button.icon、状态点 .dot
+# ---------------------------------------------------------------------------
+#
+# 与 .seg / .pill 同一性质：是**部件**不是版式，小窗与应用式都能用；全是新类名，
+# 已发版消费者的页面一个都没写过，命中不到旧元素（小窗一个像素不变）。
+
+
+def test_grid_is_a_bounded_scroller_around_a_plain_table():
+    """`<div class="grid"><table>…</table></div>`：外框自己横竖滚、限高，
+    窗口不跟着被宽表撑出横滚条。外框画成一张卡（底 / 描边 / 圆角同 .card）。"""
+    grid = rule(".grid")
+    assert "overflow: auto" in grid
+    assert re.search(r"max-height: \d+vh", grid)
+    assert "background: var(--card)" in grid
+    assert "border: 1px solid var(--border)" in grid
+    assert "border-radius: 10px" in rule(".card") and "border-radius: 10px" in grid
+
+
+def test_grid_header_sticks_while_the_body_scrolls():
+    """粘表头：滚动时表头钉在外框顶上；必须有不透明底，否则滚过去的行从
+    表头底下透出来。"""
+    th = rule(".grid th")
+    assert "position: sticky" in th and "top: 0" in th
+    assert "background: var(--card)" in th
+    assert "white-space: nowrap" in th
+
+
+def test_grid_cells_never_wrap_and_numbers_line_up():
+    td = rule(".grid td")
+    assert "white-space: nowrap" in td, "宽表靠横滚，不靠折行"
+    assert "font-variant-numeric: tabular-nums" in td
+    assert "text-align: right" in rule("td.num, th.num"), "数字列右对齐（表头跟着）"
+
+
+def test_grid_selected_row_gets_a_brand_strip_on_the_left():
+    """选中行：--wash 提亮 + 左侧 3px 品牌色条（inset 阴影画，不占列宽）。"""
+    sel = rule(".grid tbody tr.sel")
+    assert "background: var(--wash)" in sel
+    assert "box-shadow: inset 3px 0 0 var(--brand)" in sel
+
+
+def test_toolbar_is_a_wrapping_centred_row_that_kills_the_card_rhythm():
+    """工具条：筛选片 + 搜索框 + 弹簧 .grow + 右侧动作一行排开，窄窗折行。
+    `<div class="card toolbar">` 整卡即一条时，与 .actions / .field 同一个先例：
+    `.toolbar > * + *` 与 `.card > * + *` 同分，靠写在后面把竖向节奏压掉。"""
+    bar = rule(".toolbar")
+    assert "display: flex" in bar and "align-items: center" in bar
+    assert "flex-wrap: wrap" in bar
+    assert re.search(r"gap: var\(--space-\d\)", bar)
+    assert "margin-top: 0" in rule(".toolbar > * + *")
+    assert rule_pos(".toolbar > * + *") > rule_pos(".card > * + *")
+
+
+def test_chip_is_a_capsule_button_with_an_on_state():
+    chip = rule(".chip")
+    assert "border-radius: 999px" in chip
+    assert "border: 1px solid var(--border)" in chip
+    assert "background: var(--card)" in chip and "color: var(--text-dim)" in chip
+    on = rule(".chip.on")
+    assert "background: var(--wash)" in on and "color: var(--text)" in on
+    assert "font-weight: 600" in on
+    count = rule(".chip .n")
+    assert "color: var(--muted)" in count and "tabular-nums" in count
+
+
+def test_chip_beats_the_base_button_hover_and_on_beats_chip_hover():
+    """`.chip:hover`（0,2,0）本就压过 `button:hover`（0,1,1）；而 `.chip.on` 与
+    `.chip:hover` 同为 (0,2,0)，当前项被悬停时靠源码顺序保住 --wash 底。"""
+    assert rule_pos(".chip:hover") > rule_pos("button:hover, .btn:hover")
+    assert rule_pos(".chip.on") > rule_pos(".chip:hover")
+
+
+def test_search_is_one_framed_field_with_a_borderless_input_inside():
+    """`<label class="search"><svg…/><input type="search"><button class="icon">…</label>`：
+    框画在 label 上（底 / 描边 / 圆角与输入框同档），里面的 input 去掉自己的框；
+    焦点落进来时整个框换 hover 边（:focus-within），与 .input 同一个手感。"""
+    box = rule(".search")
+    assert "display: flex" in box and "align-items: center" in box
+    assert "background: var(--card)" in box and "border: 1px solid var(--border)" in box
+    assert "color: var(--muted)" in box, "放大镜 svg 走 currentColor，弱化档"
+    assert "border-color: var(--border-hover)" in rule(".search:focus-within")
+    field = rule(".search input")
+    assert "border: 0" in field and "background: none" in field
+    assert "flex: 1" in field and "min-width: 0" in field
+    assert "color: var(--text)" in field
+
+
+def test_search_input_overrides_the_base_input_focus_by_source_order():
+    """`.search input`（0,1,1）与 `input:focus`（0,1,1）同分：写在前面的话输入框
+    一获焦就在框里再画一圈边。"""
+    assert rule_pos(".search input") > rule_pos(
+        "input:focus, textarea:focus, select:focus, .input:focus-within"
+    )
+
+
+def test_switch_off_state_is_a_recessed_track_with_a_readable_knob():
+    """`<button class="switch" role="switch" aria-checked="false">`：34×20 胶囊。
+
+    关态不照抄参考实现的「--border-hover 轨道 + --on-brand 滑块」：那一对浅色下
+    只有 1.97:1，过不了控件档 3.0。改成与进度条同一套凹陷槽——轨道 --track +
+    一圈 --border 描边画出边界，滑块 --text-dim（对 track 深 7.67 / 浅 6.1）。"""
+    sw = rule("button.switch")
+    assert "width: 34px" in sw and "height: 20px" in sw
+    assert "border-radius: 999px" in sw and "padding: 0" in sw
+    assert "position: relative" in sw, "滑块绝对定位在轨道里"
+    assert "background: var(--track)" in sw
+    assert "border: 1px solid var(--border)" in sw
+    knob = rule("button.switch::after")
+    assert 'content: ""' in knob and "position: absolute" in knob
+    assert "background: var(--text-dim)" in knob
+    assert "transition: transform" in knob, "滑块滑过去，不是瞬移"
+
+
+def test_switch_on_state_is_a_brand_track_with_an_on_brand_knob():
+    on = rule('button.switch[aria-checked="true"]')
+    assert "background: var(--brand)" in on and "border-color: var(--brand)" in on
+    knob = rule('button.switch[aria-checked="true"]::after')
+    assert "background: var(--on-brand)" in knob
+    assert "transform: translateX(14px)" in knob
+
+
+def test_switch_hover_never_repaints_the_on_track():
+    """hover 只把关态的边换成 --border-hover，开态整块不变色：参考实现开态 hover
+    换 --brand-down，它对 card 只有 2.53:1（深色），掉出控件档。
+    `button.switch:hover` 与开态规则同为 (0,2,1)，开态写在后面才压得住；
+    两条都在通用按钮之后，才盖得掉 `button:hover` 那块 --wash 提亮底。"""
+    hover = rule("button.switch:hover")
+    assert "background: var(--track)" in hover
+    assert "border-color: var(--border-hover)" in hover
+    assert rule_pos('button.switch[aria-checked="true"]') > rule_pos("button.switch:hover")
+    assert rule_pos("button.switch:hover") > rule_pos("button:hover, .btn:hover")
+    assert "brand-down" not in BASE[rule_pos("button.switch"):rule_pos(".dot::before")]
+
+
+def test_switch_motion_is_stopped_by_reduced_motion():
+    """开关的轨道变色与滑块滑动都是 transition，挂在元素与 ::after 上——
+    通配符基线 `*, *::before, *::after` 罩得住（不是厂商伪元素）。"""
+    animated = animated_selectors()
+    assert "button.switch" in animated and "button.switch::after" in animated
+    for selector in ("button.switch", "button.switch::after"):
+        assert VENDOR_PSEUDO_RE.search(selector) is None
+    assert "*::after" in reduced_motion_block()
+
+
+def test_dot_is_drawn_by_a_pseudo_element_so_the_host_stays_inline():
+    """`<span class="dot ok"></span>已同步` 或 `<span class="dot ok">已同步</span>`：
+    7px 圆点画在 ::before 上。参考实现给 .dot 本体写 display: inline-block——
+    那会盖掉 hidden（小窗没有 body.app [hidden] 兜底）；挪到伪元素上，本体保持
+    行内、hidden 照常收得起来。裸 .dot 是中性 --muted 点。"""
+    dot = rule(".dot::before")
+    assert 'content: ""' in dot and "display: inline-block" in dot
+    assert "width: 7px" in dot and "height: 7px" in dot
+    assert "border-radius: 999px" in dot
+    assert "background: var(--muted)" in dot
+
+
+@pytest.mark.parametrize("state", DOT_STATES)
+def test_each_dot_state_paints_its_solid_colour(state: str):
+    assert f"background: var(--{state})" in rule(f".dot.{state}::before")
+
+
+DISPLAY_DECL_RE = re.compile(r"(?<![\w-])display\s*:")
+
+
+def host_rules_declaring_display(cls: str, css: str = BASE) -> list[str]:
+    """CSS 里所有落在 `.cls` **本体**上（不是 ::before 这类伪元素、也不是它的
+    后代）且写了 display 的选择器。含 @media 里嵌着的；先剥注释。
+
+    「落在本体上」= 选择器最后一个复合段里有 `.cls`、且没有 `::`。
+    """
+    body = CSS_COMMENT_RE.sub("", css)
+    body = re.sub(r"@keyframes[^{]*\{(?:[^{}]*\{[^}]*\})*\s*\}", "", body)
+    hits: list[str] = []
+    for head, block in re.findall(r"([^{};]+)\{([^{}]*)\}", body):
+        if not DISPLAY_DECL_RE.search(block):
+            continue
+        for part in head.strip().split(","):
+            last = re.split(r"[\s>+~]+", part.strip())[-1]
+            if re.search(re.escape(cls) + r"(?![\w-])", last) and "::" not in last:
+                hits.append(part.strip())
+    return hits
+
+
+def test_icon_button_is_a_square_that_centres_its_svg():
+    """图标按钮：正方形、内衬归零，内联 svg 成块居中、16px、颜色跟 currentColor
+    走（按钮的字色、hover 变亮都跟着变）。正方形与 .seg 按钮同档圆角。"""
+    icon = rule("button.icon")
+    assert re.search(r"width: (\d+)px", icon) and re.search(r"height: (\d+)px", icon)
+    assert re.search(r"width: (\d+)px", icon).group(1) == re.search(r"height: (\d+)px", icon).group(1)
+    assert "padding: 0" in icon
+    svg = rule("button.icon > svg")
+    assert "display: block" in svg and "margin: auto" in svg
+    assert "width: 16px" in svg and "height: 16px" in svg
+
+
+@pytest.mark.parametrize("cls", [".chip", ".icon", ".switch", ".dot"])
+def test_toggleable_widgets_never_declare_display(cls: str):
+    """这四样是页面会拿 hidden 收放的（清除叉有字才出现、开关跟着权限出没、
+    状态点按状态出没……）。小窗里没有 `body.app [hidden]` 那条兜底，作者层的
+    任何 display 都会盖掉 UA 的 `[hidden] { display: none }`——同 .notice / .pill。
+    居中、撑宽高这类要 display 的活交给子元素或伪元素去做。"""
+    leaks = host_rules_declaring_display(cls)
+    assert not leaks, f"这些规则给 {cls} 本体写了 display，hidden 收不起来：{leaks}"
+
+
+def test_display_scan_is_not_blind():
+    """自证判据：本体上写 display 的认得出（含 @media 里、选择器列表里的），
+    伪元素与后代上的不算，注释里的不算，`-webkit-box-display` 这类别的属性不算。"""
+    css = """
+    .dot { display: inline-block; }
+    .x, .chip.on { display: flex; }
+    @media (max-width: 900px) {
+      button.switch:hover { display: block; }
+    }
+    .dot::before { display: inline-block; }
+    .icon > svg { display: block; }
+    /* .icon { display: grid; } */
+    .icon { -webkit-box-display: x; }
+    """
+    assert host_rules_declaring_display(".dot", css) == [".dot"]
+    assert host_rules_declaring_display(".chip", css) == [".chip.on"]
+    assert host_rules_declaring_display(".switch", css) == ["button.switch:hover"]
+    assert host_rules_declaring_display(".icon", css) == []
+    assert host_rules_declaring_display(".toolbar") == [".toolbar"]

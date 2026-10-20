@@ -304,6 +304,10 @@ BASE_TOKEN_PAIRS: tuple[TokenPair, ...] = (
     # 现在轨道是实色凹陷底，实测 3.78:1（数字与取值理由见 tokens.css 的
     # --track 注释）。
     TokenPair("进度条填充 brand（track 底）", "brand", "track", CONTROL_MINIMUM),
+    # 开关关态的滑块画在凹陷槽 --track 上：「现在是关」靠的就是这颗滑块，所以
+    # 它按控件档登记。参考实现的「--on-brand 滑块 × --border-hover 轨道」浅色
+    # 下只有 1.97:1，过不了这一档，于是关态改成与进度条同一套凹陷槽。
+    TokenPair("开关关态滑块 text-dim（track 底）", "text-dim", "track", CONTROL_MINIMUM),
     # ---- 弱化文字（3.0）：muted 是「看得见就行」档 ----
     TokenPair("弱化文字 muted（card 底）", "muted", "card", DISABLED_MINIMUM),
     TokenPair("弱化文字 muted（card-hover 底）", "muted", "card-hover", DISABLED_MINIMUM),
@@ -317,6 +321,10 @@ BASE_TOKEN_PAIRS: tuple[TokenPair, ...] = (
     TokenPair("进度条描边 border（track 底）", "border", "track", SEPARATOR_MINIMUM),
     TokenPair("分隔线 border-hover（card-hover 底）", "border-hover", "card-hover", SEPARATOR_MINIMUM),
     TokenPair("分隔线 border-hover（win 底）", "border-hover", "win", SEPARATOR_MINIMUM),
+    # 筛选片当前项、搜索框获焦、开关关态悬停：--border-hover 这圈边直接画在
+    # 卡片底上（不是 card-hover），开关的那圈内侧还挨着凹陷槽 --track。
+    TokenPair("分隔线 border-hover（card 底）", "border-hover", "card", SEPARATOR_MINIMUM),
+    TokenPair("开关描边 border-hover（track 底）", "border-hover", "track", SEPARATOR_MINIMUM),
 )
 
 

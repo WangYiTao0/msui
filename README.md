@@ -911,6 +911,150 @@ if __name__ == "__main__":
 错峰时在元素上写 `style="--i: 序号"`，每档晚 40ms。系统开了「减少动态效果」时
 自动静止、直接以终态出现，不用自己处理。
 
+### 列表页 / 设置页部件：工具条、筛选片、搜索框、数据网格、图标按钮、开关、状态点
+
+清单 / 设置这类页面常用的七样，**都是部件不是版式**：小工具窗与应用式
+（`<body class="app">` 的 `.pane` 里）都能用，不写一行样式；全是新类名，
+没写过它们的旧页面一个像素不变。照抄这份：
+
+```html
+<!-- examples/minimal/pages/widgets.html -->
+<!DOCTYPE html>
+<!--
+  列表页 / 设置页部件：工具条 + 筛选片 + 搜索框、数据网格、图标按钮、开关、状态点。
+  全是部件不是版式：小工具窗（这一页）与应用式（<body class="app"> 的 .pane 里）
+  都能用，不写一行样式。
+  - 工具条 .toolbar：一行排开、窄窗折行，右推用 .grow；
+  - 筛选片 .chip：当前项挂 .on（同时把 aria-pressed 写对），右侧 .n 是计数；
+  - 搜索框 .search：框画在 label 上，里面放放大镜 svg + 无框 input + 清除叉
+    （有内容时才 hidden = false）；
+  - 数据网格 .grid：包一层就有横竖滚 + 粘表头；数字列 td / th 挂 .num 右对齐，
+    选中行挂 tr.sel；
+  - 图标按钮 button.icon：只放一个内联 svg，stroke / fill 写 currentColor，
+    aria-label 写明动作。**不用 Unicode 箭头**（Windows 字体里常缺字形）；
+  - 开关 button.switch：role="switch"，点一下翻 aria-checked；文字用
+    <label for> 指过去，点字也能切；
+  - 状态点 .dot：裸 .dot 是中性点，ok / warn / info / error 四个状态。
+  这几样收放都用 hidden 属性，别给它们写 display。用不上的整块删掉即可。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>应用名</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+</head>
+<body>
+  <h1>清单</h1>
+  <p>筛选、搜索、选中一行再上下挪。</p>
+  <div class="toolbar" id="filters">
+    <button class="chip on" aria-pressed="true">全部<span class="n">3</span></button>
+    <button class="chip" aria-pressed="false">待处理<span class="n">1</span></button>
+    <label class="search">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+      <input type="search" id="q" placeholder="搜索名称">
+      <button class="icon" type="button" id="q-clear" aria-label="清除" hidden>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+      </button>
+    </label>
+    <span class="grow"></span>
+    <button class="icon" aria-label="上移">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 13V3M4 7l4-4 4 4"/></svg>
+    </button>
+    <button class="icon" aria-label="下移">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3v10M4 9l4 4 4-4"/></svg>
+    </button>
+  </div>
+  <div class="grid">
+    <table>
+      <thead><tr><th>名称</th><th>状态</th><th class="num">数量</th><th class="num">金额</th></tr></thead>
+      <tbody id="rows">
+        <tr><td>条目一</td><td><span class="dot ok">完成</span></td><td class="num">1,200</td><td class="num">36.50</td></tr>
+        <tr class="sel"><td>条目二</td><td><span class="dot warn">待确认</span></td><td class="num">85</td><td class="num">4.20</td></tr>
+        <tr><td>条目三</td><td><span class="dot error">失败</span></td><td class="num">0</td><td class="num">0.00</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <div class="toolbar">
+      <button class="switch" role="switch" aria-checked="true" id="backup"></button>
+      <label for="backup">每天自动备份</label>
+    </div>
+    <div class="toolbar">
+      <button class="switch" role="switch" aria-checked="false" id="notify"></button>
+      <label for="notify">跑完弹通知</label>
+    </div>
+  </div>
+  <script>
+    // 筛选片：单选，当前项挂 .on、aria-pressed 跟着写对。
+    const filters = document.getElementById("filters");
+    filters.addEventListener("click", (event) => {
+      const picked = event.target.closest(".chip");
+      if (!picked) return;
+      for (const chip of filters.querySelectorAll(".chip")) {
+        const on = chip === picked;
+        chip.classList.toggle("on", on);
+        chip.setAttribute("aria-pressed", String(on));
+      }
+    });
+    // 搜索框：有内容才露出清除叉。
+    const q = document.getElementById("q");
+    const clear = document.getElementById("q-clear");
+    q.addEventListener("input", () => { clear.hidden = q.value === ""; });
+    clear.addEventListener("click", () => { q.value = ""; clear.hidden = true; q.focus(); });
+    // 数据网格：点一行选中（tr.sel）。
+    const rows = document.getElementById("rows");
+    rows.addEventListener("click", (event) => {
+      const row = event.target.closest("tr");
+      if (!row) return;
+      for (const tr of rows.rows) tr.classList.toggle("sel", tr === row);
+    });
+    // 开关：长相只认 aria-checked，点一下翻过去。
+    for (const sw of document.querySelectorAll(".switch")) {
+      sw.addEventListener("click", () => {
+        const on = sw.getAttribute("aria-checked") !== "true";
+        sw.setAttribute("aria-checked", String(on));
+      });
+    }
+  </script>
+</body>
+</html>
+```
+
+- **工具条 `.toolbar`**：一行排开、垂直居中、窄窗折行；右推用 `.grow`。
+  `<div class="card toolbar">` 整卡即一条也成立（与 `.actions` 同一个规矩）；
+- **筛选片 `.chip`**：胶囊形按钮，当前项挂 `.on`（单选时同时把
+  `aria-pressed` 写对），右侧 `<span class="n">` 是计数；
+- **搜索框 `.search`**：框画在 `<label>` 上，里面放放大镜 svg + 无框 input；
+  清除叉是一颗 `button.icon`，有内容时才 `hidden = false`（原生 type=search
+  自带的那个浅灰叉不吃 token，已经摘掉）；
+- **数据网格 `.grid`**：给普通 `<table>` 包一层 `<div class="grid">`，就有横竖
+  滚（限高 46vh，要更高就覆写 `max-height`）+ 粘表头 + 单元格不折行；数字列
+  的 td / th 挂 `.num` 右对齐；选中行挂 `tr.sel`（提亮 + 左侧 3px 品牌色条）；
+- **图标按钮 `button.icon`**：28px 正方形，边框、hover、按下回弹全沿用通用
+  按钮。图标**一律内联 svg**，stroke / fill 写 `currentColor`（按钮的字色、
+  hover 变亮都跟着变），`aria-label` 写明动作。**不用 Unicode 箭头 / 符号字**
+  （`↥` `⤒` 这类在 Windows 的 Segoe UI 里没有字形，会掉成方块）；
+- **开关 `button.switch`**：`role="switch"`，长相只认 `aria-checked`——点一下
+  在 `"true"` / `"false"` 之间翻，读屏也读它，两边不会对不上。文字用
+  `<label for>` 指过去，点字也能切。关态是凹陷槽（同进度条），开态品牌色，
+  深浅两套都过对比度闸门；
+- **状态点 `.dot`**：`<span class="dot ok"></span>已同步`，或把字包进去
+  `<span class="dot ok">已同步</span>`。裸 `.dot` 是中性点，四个状态
+  `ok` / `warn` / `info` / `error` 与 `.pill` 同一套名字；
+- 这几样收放一律用 `hidden`，**别给它们写 `display`**（同 `.notice`）。
+
+**数据网格的坑：冒烟里别按列下标取值。** 表格加一列、挪一列是常事，冒烟里
+写 `row.cells[3]` 的话，列位置一变，后面每一列的断言**整体错一位**——而且
+往往不报错，只是拿「金额」去比「数量」，错得悄无声息。按表头文字找下标
+（或者给单元格挂 `data-col`）再取：
+
+```js
+const heads = [...document.querySelectorAll(".grid thead th")].map((th) => th.textContent.trim());
+const col = (name) => { const i = heads.indexOf(name); if (i < 0) throw new Error("没有这一列：" + name); return i; };
+const qty = row.cells[col("数量")].textContent;
+```
+
 ## 4. override.css（默认不用）
 
 默认零配置、不建这个文件。真要换色（比如另一套品牌色）时：
@@ -1197,6 +1341,15 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
     互斥选项用 .seg（当前项挂 .on），日期/计数/状态胶囊用 .pill（可加
     ok/warn/info/error），flex 行里推到最右用 .grow，进场动效挂 .fade-in
     （错峰写 style="--i: 序号"）。这些都不许自己写版式 CSS 或配色。
+16. 清单 / 设置页的部件（小窗与应用式都能用，从 msui README §3 的
+    widgets.html 可抄块起步）：工具条 .toolbar（右推用 .grow）、筛选片
+    .chip（当前项 .on，计数 <span class="n">）、搜索框 <label class="search">、
+    数据网格 <div class="grid"><table>（数字列 td/th 挂 .num，选中行 tr.sel）、
+    图标按钮 button.icon（**只用内联 svg + currentColor，不用 Unicode 箭头**，
+    写 aria-label）、开关 <button class="switch" role="switch"
+    aria-checked="false">（点击翻 aria-checked）、状态点 .dot（ok/warn/
+    info/error）。收放用 hidden、不写 display。冒烟里取表格单元格按表头
+    文字找列，**不按下标**——加列 / 挪列后下标取值会整体错位。
 ```
 
 ## 发布（维护者）
