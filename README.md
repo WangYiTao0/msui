@@ -370,6 +370,72 @@ def make_smoke_script(serve_dir: Path):
         )
         drive.check(capped == "capped", f"宽窗里对话框该停在 --content-max 并居中，实测 {capped!r}")
         window.resize(560, 520)
+        # 文字可选：run() 默认 text_select=True，pywebview 不再往页面注入
+        # `body { user-select: none }`——正文选得中、复制得出；按钮这类点的东西由
+        # base.css 声明不可选。（WebKit 只认带前缀的那个属性，两个都读。）
+        selectable = drive.wait_js(
+            window,
+            "(() => { const us = el => { const cs = getComputedStyle(el);"
+            "   return cs.userSelect || cs.webkitUserSelect; };"
+            " const p = document.querySelector('p'); const b = document.querySelector('button');"
+            " if (!p || !b) return 'missing';"
+            " return (us(p) === 'none' ? 'text-locked ' : 'text-ok ')"
+            "   + (us(b) === 'none' ? 'button-ok' : 'button-selectable ' + us(b)); })()",
+            "text-ok button-ok",
+        )
+        drive.check(
+            selectable == "text-ok button-ok",
+            f"正文该可选、按钮该不可选，实测 {selectable!r}",
+        )
+        # 应用式页面（app-layout.html）：步骤卡、读数卡、深浅切换。换页后等新页面的
+        # 读数卡出现——旧页面没有 .kpis，不会把旧页面的 complete 误当成新页面的。
+        window.load_url(str(serve_dir / "app-layout.html"))
+        loaded = drive.wait_js(
+            window,
+            "document.readyState === 'complete' && !!document.querySelector('.kpis')"
+            " ? 'ready' : 'loading'",
+            "ready",
+        )
+        drive.check(loaded == "ready", f"app-layout.html 没加载出来，实测 {loaded!r}")
+        # 没存过偏好（这一趟 run 没给 storage_dir，localStorage 是空的）→ 开窗即浅色。
+        theme = drive.wait_js(
+            window, "document.documentElement.dataset.theme || 'dark'", "light"
+        )
+        drive.check(theme == "light", f"没存过偏好时该开窗即浅色，实测 {theme!r}")
+        # 步骤卡、读数卡真的吃到了 token 色（比的是浅色下页面实际解出来的值）。
+        # 放在切主题之前：步骤卡的底色带 transition，隐藏窗里 transition 不推进，
+        # 切完再读会读到过渡起点。
+        drive.check_token_style(window, ".step.cur", "backgroundColor", "card")
+        drive.check_token_style(window, ".step.done .num i", "backgroundColor", "brand")
+        drive.check_token_style(window, ".step.done .num i", "color", "on-brand")
+        drive.check_token_style(window, ".step.wait .title", "color", "muted")
+        drive.check_token_style(window, ".eyebrow", "color", "muted")
+        drive.check_token_style(window, ".kpi .val", "color", "text")
+        drive.check_token_style(window, ".kpi.warn .val", "color", "warn")
+        wrap = window.evaluate_js(
+            "(() => { const td = document.querySelector('.grid td.wrap');"
+            " return td ? getComputedStyle(td).whiteSpace : 'missing'; })()"
+        )
+        drive.check(wrap == "normal", f"整句列 td.wrap 该允许换行，实测 {wrap!r}")
+        # 主题按钮：点一次翻到深色（图标换成太阳、localStorage 存 ''、提示改成
+        # 「切换到浅色」），再点一次翻回浅色。
+        flips = window.evaluate_js(
+            "(() => { const b = document.querySelector('[data-theme-toggle]');"
+            " if (!b) return 'missing';"
+            " const shown = () => ['sun', 'moon'].filter(c =>"
+            "   getComputedStyle(b.querySelector('.' + c)).display !== 'none').join('+');"
+            " const state = () => { let saved; try { saved = localStorage.getItem('theme'); }"
+            "   catch (e) { saved = 'unavailable'; }"
+            "   return [document.documentElement.dataset.theme || 'dark', shown(),"
+            "     JSON.stringify(saved), b.getAttribute('aria-label')].join(' '); };"
+            " const before = state(); b.click(); const once = state(); b.click();"
+            " return [before, once, state()].join(' / '); })()"
+        )
+        want = (
+            "light moon null 切换到深色 / dark sun \"\" 切换到浅色"
+            " / light moon \"light\" 切换到深色"
+        )
+        drive.check(flips == want, f"主题按钮该翻转主题、图标与偏好，实测 {flips!r}")
         # 横幅钉版：落地 css 第一行 == "/* msui <钉的版本> */"。横幅只证明
         # css 落了地，「页面吃进去了」由上面 check_token_style 证明，两条各管一半。
         banner = (serve_dir / "tokens.css").read_text(encoding="utf-8").splitlines()[0]
@@ -810,11 +876,16 @@ if __name__ == "__main__":
   拼满整窗，内容区各自滚，body 自己不滚。不挂 class="app" 的页面还是 560×520
   小工具窗那套（skeleton.html），一个像素不变。
   三段：
-  - 顶栏 <header class="top">：程序名 + 分段 .seg + 弹簧 .grow + 徽章 .pill；
+  - 顶栏 <header class="top">：程序名 + 分段 .seg + 弹簧 .grow + 徽章 .pill +
+    深浅切换按钮（button.icon[data-theme-toggle]，配 <head> 里的 tokens-light.css
+    与 theme.js；没存过偏好时开窗即浅色）；
   - 多栏 <div class="cols">：左栏 .rail 定宽（--rail-width）、主区 .pane 吃剩余
     宽度，两边各自滚；窄窗（< 900px）左栏自动退到上面。没有左栏的页面删掉
     <aside>，.pane 留着即可；
   - 状态栏 <footer class="status">：版本 / 数据目录 / 当前状态一条细栏。
+  左栏是一串步骤卡 .step（.done 已完成 / .cur 当前 / .wait 等待，卡里放说明
+  .meta、参数 .param、动作 .act、进度条），上面一行小标题 .eyebrow；主区一排读数卡
+  .kpis / .kpi（空态写破折号、警示态 .warn），数据网格里放整句话的列挂 td.wrap。
   进场动效给块挂 .fade-in，要错峰就在元素上写 style="--i: 序号"；系统开了
   「减少动态效果」时自动静止。用不上的整块删掉即可。
 -->
@@ -824,6 +895,8 @@ if __name__ == "__main__":
   <title>应用名</title>
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="tokens-light.css">
+  <script src="theme.js"></script>
 </head>
 <body class="app">
   <header class="top">
@@ -835,32 +908,75 @@ if __name__ == "__main__":
     <span class="grow"></span>
     <span class="pill info">2024-01-31</span>
     <span class="pill ok">已同步</span>
+    <button class="icon" type="button" data-theme-toggle aria-label="切换深色 / 浅色">
+      <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
   </header>
   <div class="cols">
-    <aside class="rail">
-      <h2>参数</h2>
-      <div class="field">
-        <label for="src">数据目录</label>
-        <input id="src">
-        <button>浏览</button>
+    <aside class="rail" id="steps">
+      <div class="eyebrow"><span class="t">流程</span><span class="n">第 2 步 / 共 3 步</span></div>
+      <div class="step done" tabindex="0" role="button">
+        <div class="head"><span class="num"><i>1</i></span><span class="title">读取数据</span></div>
+        <p class="meta">已读 <b>6</b> 张表。</p>
+        <p class="meta good">全部识别成功。</p>
       </div>
-      <div class="actions">
-        <button class="primary">运行</button>
-        <button>重置</button>
+      <div class="step cur" tabindex="0" role="button">
+        <div class="head"><span class="num"><i>2</i></span><span class="title">设定范围</span></div>
+        <div class="param">
+          <label for="from">起始月</label>
+          <input id="from" placeholder="YYYY-MM">
+          <label for="src">数据目录</label>
+          <div class="row"><input id="src"><button>浏览</button></div>
+        </div>
+        <p class="meta hint">结束月留空 = 到最新一个月。</p>
+        <div class="act"><button class="primary">运行</button><button>重置</button></div>
+        <progress value="42" max="100"></progress>
+      </div>
+      <div class="step wait" tabindex="0" role="button">
+        <div class="head"><span class="num"><i>3</i></span><span class="title">导出</span></div>
+        <p class="meta">上一步跑完才能导出。</p>
+        <p class="meta fail" hidden>导出失败：目标文件被占用。</p>
+        <div class="act"><button disabled>导出结果</button></div>
       </div>
     </aside>
     <main class="pane">
       <h2>结果</h2>
       <p>主区自己滚；宽表格放这里，窗口拉多大就摊多宽。</p>
-      <div class="card fade-in" style="--i: 0">第一块</div>
-      <div class="card fade-in" style="--i: 1">第二块：错峰晚 40ms 进场</div>
-      <table>
-        <thead><tr><th>名称</th><th>状态</th></tr></thead>
-        <tbody>
-          <tr><td>条目一</td><td><span class="pill ok">完成</span></td></tr>
-          <tr><td>条目二</td><td><span class="pill warn">待确认</span></td></tr>
-        </tbody>
-      </table>
+      <div class="kpis">
+        <div class="card kpi fade-in" style="--i: 0">
+          <div class="lbl">合计</div>
+          <div class="val">128<small>件</small></div>
+          <div class="sub"><span>甲 96</span><span>乙 32</span></div>
+        </div>
+        <div class="card kpi fade-in" style="--i: 1">
+          <div class="lbl">已完成</div>
+          <div class="val">120<small>件</small></div>
+          <div class="sub">占合计 94%</div>
+        </div>
+        <div class="card kpi warn fade-in" style="--i: 2">
+          <div class="lbl">告警</div>
+          <div class="val">8<small>条</small></div>
+          <div class="sub">需要人工确认</div>
+        </div>
+        <div class="card kpi fade-in" style="--i: 3">
+          <div class="lbl">待导出</div>
+          <div class="val">—</div>
+          <div class="sub"><span class="dim">还没读取数据，先跑第 1 步。</span></div>
+        </div>
+      </div>
+      <div class="card fade-in" style="--i: 4">
+        <div class="eyebrow"><span class="t">明细</span><span class="n">2 条</span><span class="grow"></span><button>导出</button></div>
+        <div class="grid">
+          <table>
+            <thead><tr><th>名称</th><th>状态</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td>条目一</td><td><span class="pill ok">完成</span></td><td class="wrap">按默认范围读取：D:/数据/2024/01/条目一_明细_最终版.xlsx</td></tr>
+              <tr><td>条目二</td><td><span class="pill warn">待确认</span></td><td class="wrap">数量与上一轮相差超过一成，请核对来源表后再导出。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </main>
   </div>
   <footer class="status">
@@ -880,6 +996,22 @@ if __name__ == "__main__":
         button.classList.toggle("on", on);
         button.setAttribute("aria-pressed", String(on));
       }
+    });
+    // 步骤卡：点一下（或 Tab 过去按 Enter / 空格）切成当前步；卡里的按钮、输入框照常用。
+    const steps = document.getElementById("steps");
+    const pick = (step) => {
+      for (const s of steps.querySelectorAll(".step")) s.classList.toggle("cur", s === step);
+    };
+    steps.addEventListener("click", (event) => {
+      if (event.target.closest("button, input")) return;
+      const step = event.target.closest(".step");
+      if (step) pick(step);
+    });
+    steps.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      if (!event.target.classList.contains("step")) return;
+      event.preventDefault();
+      pick(event.target);
     });
   </script>
 </body>

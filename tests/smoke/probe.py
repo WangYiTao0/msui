@@ -14,6 +14,10 @@
      直调 kernel32，PyInstaller 冻结后 ctypes/api-ms-* 那套依赖是否齐全只有
      真产物答得出。做法是真双开：窗口开着（锁持有中）时 spawn 一份自己，
      副本必须打出 BLOCKED 并自己退出。
+  ④ 票 #27 的部件与开关在真窗口里成立：第二页（widgets.html）上步骤卡、读数卡
+     的 computedStyle 取到 token 色；没存偏好时开窗即浅色；点主题按钮后
+     data-theme 翻转、图标切换、localStorage 写入；正文 user-select 不是 none、
+     按钮是 none；另起一份 `run(text_select=False)` 的副本，正文必须是 none。
 
 输出约定：最后一行 ``SMOKE-RESULT {json}``（全部读数），失败清单非空则
 退出码 1；watchdog 超时直接 os._exit(2)。所有 print 均 flush——冻结产物
@@ -43,6 +47,17 @@ EXPECTED_VERSION_ENV = "MSUI_EXPECTED_VERSION"
 SINGLE_INSTANCE_ID = "msui-smoke-probe"
 SECOND_INSTANCE_ENV = "MSUI_SECOND_INSTANCE"
 SECOND_INSTANCE_TIMEOUT = 60
+# 票 #27：「text_select=False 时正文不可选」要另开一扇窗验——同一进程里 run()
+# 只能起一次主循环。副本走环境变量开关，单例守卫关掉（主窗口正持有锁）。
+TEXT_SELECT_OFF_ENV = "MSUI_TEXT_SELECT_OFF"
+
+# 页面里读 user-select：WebKit 只认带前缀的那个属性，两个都读。
+_USER_SELECT_JS = (
+    "(() => { const us = el => { const cs = getComputedStyle(el);"
+    " return cs.userSelect || cs.webkitUserSelect; };"
+    " const p = document.getElementById('{text_id}'); const b = document.querySelector('button');"
+    " if (!p || !b) return 'missing'; return us(p) + ' ' + us(b); })()"
+)
 
 # Windows 控制台默认 cp1252，本探针输出带中文——自己把 stdout/stderr 掰成
 # UTF-8，不指望调用方记得设 PYTHONUTF8（errors="replace" 保底：宁可读数里
@@ -96,6 +111,112 @@ def _hex_to_channels(hex_color: str) -> str:
     return ",".join(str(int(raw[i : i + 2], 16)) for i in (0, 2, 4))
 
 
+def token_check(window, name: str, selector: str, prop: str, token: str) -> None:  # noqa: ANN001
+    """元素实测 computedStyle[prop] == 页面此刻把 var(--token) 解出来的颜色。
+
+    跟页面自己解出来的值比（同 msui.testing.SmokeDriver.check_token_style），
+    深浅主题都成立，不写死十六进制。"""
+    js = (
+        "(() => {"
+        f" const el = document.querySelector({json.dumps(selector)});"
+        " if (!el) return 'missing|';"
+        " const v = getComputedStyle(document.documentElement)"
+        f"   .getPropertyValue({json.dumps('--' + token)}).trim();"
+        " const probe = document.createElement('div'); probe.style.color = v || 'transparent';"
+        " document.body.appendChild(probe); const want = getComputedStyle(probe).color; probe.remove();"
+        f" return getComputedStyle(el)[{json.dumps(prop)}] + '|' + want; }})()"
+    )
+    actual, _, want = str(window.evaluate_js(js)).partition("|")
+    check(name, bool(want) and actual == want, f"{selector} {prop}={actual} want --{token}={want}")
+
+
+def text_select_off_main() -> int:
+    """副本模式：`run(text_select=False)` 开一扇隐藏窗，打一行正文的 user-select。"""
+    seen: list[str] = []
+
+    def on_ready_off(window) -> None:  # noqa: ANN001
+        try:
+            for _ in range(200):
+                if window.evaluate_js("document.readyState") == "complete":
+                    break
+                time.sleep(0.1)
+            seen.append(str(window.evaluate_js(_USER_SELECT_JS.replace("{text_id}", "probe-text"))))
+        finally:
+            window.destroy()
+
+    run(
+        page_dir() / "widgets.html",
+        title="msui-smoke-probe-text-select-off",
+        hidden=True,
+        text_select=False,
+        single_instance=False,
+        on_ready=on_ready_off,
+    )
+    print("TEXT-SELECT-OFF " + (seen[0] if seen else "never-ran"), flush=True)
+    return 0
+
+
+def _spawn_self(env_name: str) -> subprocess.CompletedProcess:
+    """起一份自己（副本模式由环境变量选）。冻结态 sys.executable 就是 probe.exe 本身。"""
+    argv = [sys.executable]
+    if not getattr(sys, "frozen", False):
+        argv.append(str(Path(__file__).resolve()))
+    env = {**os.environ, env_name: "1"}
+    return subprocess.run(
+        argv,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=SECOND_INSTANCE_TIMEOUT,
+    )
+
+
+def check_widgets_page(window) -> None:  # noqa: ANN001
+    """票 #27：第二页上的步骤卡、读数卡、主题切换、文字可选。"""
+    window.load_url(str(page_dir() / "widgets.html"))
+    for _ in range(200):
+        if window.evaluate_js(
+            "document.readyState === 'complete' && !!document.querySelector('.kpis')"
+        ):
+            break
+        time.sleep(0.1)
+    else:
+        failures.append("widgets_page_load: widgets.html 一直没加载出来")
+        return
+
+    theme = window.evaluate_js("document.documentElement.dataset.theme || 'dark'")
+    check("theme_default_light", theme == "light", theme)
+
+    # 切主题之前读：步骤卡底色带 transition，隐藏窗里 transition 不推进。
+    token_check(window, "step_cur_bg", ".step.cur", "backgroundColor", "card")
+    token_check(window, "step_done_num_bg", ".step.done .num i", "backgroundColor", "brand")
+    token_check(window, "step_done_num_color", ".step.done .num i", "color", "on-brand")
+    token_check(window, "step_wait_title_color", ".step.wait .title", "color", "muted")
+    token_check(window, "kpi_val_color", ".kpi .val", "color", "text")
+    token_check(window, "kpi_warn_val_color", ".kpi.warn .val", "color", "warn")
+
+    selectable = str(window.evaluate_js(_USER_SELECT_JS.replace("{text_id}", "probe-text")))
+    text_us, _, button_us = selectable.partition(" ")
+    check("user_select_text", text_us not in ("none", "missing"), text_us)
+    check("user_select_button", button_us == "none", button_us)
+
+    flips = window.evaluate_js(
+        "(() => { const b = document.querySelector('[data-theme-toggle]');"
+        " if (!b) return 'missing';"
+        " const shown = () => ['sun', 'moon'].filter(c =>"
+        "   getComputedStyle(b.querySelector('.' + c)).display !== 'none').join('+');"
+        " const state = () => { let saved; try { saved = localStorage.getItem('theme'); }"
+        "   catch (e) { saved = 'unavailable'; }"
+        "   return [document.documentElement.dataset.theme || 'dark', shown(),"
+        "     JSON.stringify(saved)].join(' '); };"
+        " b.click(); const once = state(); b.click();"
+        " return once + ' / ' + state(); })()"
+    )
+    check("theme_toggle", flips == 'dark sun "" / light moon "light"', flips)
+
+
 def second_instance_main() -> int:
     """副本模式：同 id 再 run 一次，把守卫的判定打成一行标记。
 
@@ -123,20 +244,8 @@ def second_instance_main() -> int:
 
 
 def _spawn_second_instance() -> subprocess.CompletedProcess:
-    """起一份自己当第二实例。冻结态 sys.executable 就是 probe.exe 本身。"""
-    argv = [sys.executable]
-    if not getattr(sys, "frozen", False):
-        argv.append(str(Path(__file__).resolve()))
-    env = {**os.environ, SECOND_INSTANCE_ENV: "1"}
-    return subprocess.run(
-        argv,
-        env=env,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=SECOND_INSTANCE_TIMEOUT,
-    )
+    """起一份自己当第二实例。"""
+    return _spawn_self(SECOND_INSTANCE_ENV)
 
 
 def on_ready(window) -> None:  # noqa: ANN001 - pywebview Window，探针不引类型
@@ -205,6 +314,25 @@ def on_ready(window) -> None:  # noqa: ANN001 - pywebview Window，探针不引�
         except subprocess.TimeoutExpired:
             # 副本没在预算内退出 = 守卫没拦住又卡在主循环里，这本身就是失败。
             check("second_instance_blocked", False, "副本超时未退出")
+
+        # 待验条款④：票 #27 的部件、主题切换、文字可选（第二页）。
+        check_widgets_page(window)
+
+        # text_select=False 的副本：正文必须不可选（pywebview 注入的那条生效）。
+        try:
+            off = _spawn_self(TEXT_SELECT_OFF_ENV)
+            line = next(
+                (ln for ln in off.stdout.splitlines() if ln.startswith("TEXT-SELECT-OFF ")), ""
+            )
+            text_us = line.removeprefix("TEXT-SELECT-OFF ").partition(" ")[0]
+            check(
+                "text_select_off_locks_text",
+                text_us == "none",
+                f"rc={off.returncode} out={off.stdout.strip()[-200:]!r}"
+                f" err={off.stderr.strip()[-200:]!r}",
+            )
+        except subprocess.TimeoutExpired:
+            check("text_select_off_locks_text", False, "副本超时未退出")
     except Exception:  # noqa: BLE001 - 探针要把任何炸法都带出窗口报出来
         failures.append("on_ready 崩了：\n" + traceback.format_exc())
     finally:
@@ -214,6 +342,8 @@ def on_ready(window) -> None:  # noqa: ANN001 - pywebview Window，探针不引�
 def main() -> int:
     if os.environ.get(SECOND_INSTANCE_ENV) == "1":
         return second_instance_main()
+    if os.environ.get(TEXT_SELECT_OFF_ENV) == "1":
+        return text_select_off_main()
 
     watchdog = threading.Timer(
         TIMEOUT_SECONDS,

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<!--
+  冻结冒烟探针的第二页（票 #27）：步骤卡、读数卡、深浅切换按钮、文字可选。
+  tokens-light.css / theme.js 与另外两份一样由 copy_assets 落进本目录、不入仓。
+  探针在第一页读完之后 load_url 到这一页：没存过偏好 → 开窗即浅色，所以这一页
+  的读数一律跟页面自己解出来的 token 值比，不写死深色的十六进制。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>msui freeze smoke probe · widgets</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="tokens-light.css">
+  <script src="theme.js"></script>
+</head>
+<body class="app">
+  <header class="top">
+    <h1>探针</h1>
+    <span class="grow"></span>
+    <button class="icon" type="button" data-theme-toggle aria-label="切换深色 / 浅色">
+      <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"/></svg>
+      <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
+  </header>
+  <div class="cols">
+    <aside class="rail">
+      <div class="eyebrow"><span class="t">流程</span></div>
+      <div class="step done"><div class="head"><span class="num"><i>1</i></span><span class="title">甲</span></div></div>
+      <div class="step cur"><div class="head"><span class="num"><i>2</i></span><span class="title">乙</span></div>
+        <p class="meta" id="probe-text">正文这一句要选得中。</p></div>
+      <div class="step wait"><div class="head"><span class="num"><i>3</i></span><span class="title">丙</span></div></div>
+    </aside>
+    <main class="pane">
+      <div class="kpis">
+        <div class="card kpi"><div class="lbl">合计</div><div class="val">128</div></div>
+        <div class="card kpi warn"><div class="lbl">告警</div><div class="val">8</div></div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
