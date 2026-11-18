@@ -1,4 +1,5 @@
-# 这三份由 copy_assets 在启动时落进来，不入仓——唯一来源是装的那版 msui。
+# 这四份由 copy_assets 在启动时落进来，不入仓——唯一来源是装的那版 msui。
 tokens.css
 base.css
 tokens-light.css
+theme.js

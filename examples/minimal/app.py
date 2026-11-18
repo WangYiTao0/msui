@@ -25,7 +25,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.10.0"
+MSUI_PINNED = "0.11.0"
 
 
 class Api:
@@ -334,6 +334,72 @@ def make_smoke_script(serve_dir: Path):
         )
         drive.check(capped == "capped", f"宽窗里对话框该停在 --content-max 并居中，实测 {capped!r}")
         window.resize(560, 520)
+        # 文字可选：run() 默认 text_select=True，pywebview 不再往页面注入
+        # `body { user-select: none }`——正文选得中、复制得出；按钮这类点的东西由
+        # base.css 声明不可选。（WebKit 只认带前缀的那个属性，两个都读。）
+        selectable = drive.wait_js(
+            window,
+            "(() => { const us = el => { const cs = getComputedStyle(el);"
+            "   return cs.userSelect || cs.webkitUserSelect; };"
+            " const p = document.querySelector('p'); const b = document.querySelector('button');"
+            " if (!p || !b) return 'missing';"
+            " return (us(p) === 'none' ? 'text-locked ' : 'text-ok ')"
+            "   + (us(b) === 'none' ? 'button-ok' : 'button-selectable ' + us(b)); })()",
+            "text-ok button-ok",
+        )
+        drive.check(
+            selectable == "text-ok button-ok",
+            f"正文该可选、按钮该不可选，实测 {selectable!r}",
+        )
+        # 应用式页面（app-layout.html）：步骤卡、读数卡、深浅切换。换页后等新页面的
+        # 读数卡出现——旧页面没有 .kpis，不会把旧页面的 complete 误当成新页面的。
+        window.load_url(str(serve_dir / "app-layout.html"))
+        loaded = drive.wait_js(
+            window,
+            "document.readyState === 'complete' && !!document.querySelector('.kpis')"
+            " ? 'ready' : 'loading'",
+            "ready",
+        )
+        drive.check(loaded == "ready", f"app-layout.html 没加载出来，实测 {loaded!r}")
+        # 没存过偏好（这一趟 run 没给 storage_dir，localStorage 是空的）→ 开窗即浅色。
+        theme = drive.wait_js(
+            window, "document.documentElement.dataset.theme || 'dark'", "light"
+        )
+        drive.check(theme == "light", f"没存过偏好时该开窗即浅色，实测 {theme!r}")
+        # 步骤卡、读数卡真的吃到了 token 色（比的是浅色下页面实际解出来的值）。
+        # 放在切主题之前：步骤卡的底色带 transition，隐藏窗里 transition 不推进，
+        # 切完再读会读到过渡起点。
+        drive.check_token_style(window, ".step.cur", "backgroundColor", "card")
+        drive.check_token_style(window, ".step.done .num i", "backgroundColor", "brand")
+        drive.check_token_style(window, ".step.done .num i", "color", "on-brand")
+        drive.check_token_style(window, ".step.wait .title", "color", "muted")
+        drive.check_token_style(window, ".eyebrow", "color", "muted")
+        drive.check_token_style(window, ".kpi .val", "color", "text")
+        drive.check_token_style(window, ".kpi.warn .val", "color", "warn")
+        wrap = window.evaluate_js(
+            "(() => { const td = document.querySelector('.grid td.wrap');"
+            " return td ? getComputedStyle(td).whiteSpace : 'missing'; })()"
+        )
+        drive.check(wrap == "normal", f"整句列 td.wrap 该允许换行，实测 {wrap!r}")
+        # 主题按钮：点一次翻到深色（图标换成太阳、localStorage 存 ''、提示改成
+        # 「切换到浅色」），再点一次翻回浅色。
+        flips = window.evaluate_js(
+            "(() => { const b = document.querySelector('[data-theme-toggle]');"
+            " if (!b) return 'missing';"
+            " const shown = () => ['sun', 'moon'].filter(c =>"
+            "   getComputedStyle(b.querySelector('.' + c)).display !== 'none').join('+');"
+            " const state = () => { let saved; try { saved = localStorage.getItem('theme'); }"
+            "   catch (e) { saved = 'unavailable'; }"
+            "   return [document.documentElement.dataset.theme || 'dark', shown(),"
+            "     JSON.stringify(saved), b.getAttribute('aria-label')].join(' '); };"
+            " const before = state(); b.click(); const once = state(); b.click();"
+            " return [before, once, state()].join(' / '); })()"
+        )
+        want = (
+            "light moon null 切换到深色 / dark sun \"\" 切换到浅色"
+            " / light moon \"light\" 切换到深色"
+        )
+        drive.check(flips == want, f"主题按钮该翻转主题、图标与偏好，实测 {flips!r}")
         # 横幅钉版：落地 css 第一行 == "/* msui <钉的版本> */"。横幅只证明
         # css 落了地，「页面吃进去了」由上面 check_token_style 证明，两条各管一半。
         banner = (serve_dir / "tokens.css").read_text(encoding="utf-8").splitlines()[0]

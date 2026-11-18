@@ -681,8 +681,11 @@ def test_every_app_layout_rule_hangs_under_the_body_app_switch():
     selectors = all_selectors()
     assert "body.app" in selectors, "扫描没扫到 body.app——扫描本身坏了，它的绿不作数"
     assert "progress::-webkit-progress-bar" in selectors, "@media 里嵌着的规则没扫到"
+    # :focus-visible 只抓「全局」那种（前面不贴着类名 / 标签名）：`.step:focus-visible`
+    # 这类挂在部件自己类名上的焦点环（票 #27）命中不到旧元素，不算漏。
     pattern = re.compile(
-        r"\.(?:" + "|".join(APP_ONLY_CLASSES) + r")(?![\w-])|\[hidden\]|:focus-visible"
+        r"\.(?:" + "|".join(APP_ONLY_CLASSES) + r")(?![\w-])|\[hidden\]"
+        r"|(?<![\w\])-]):focus-visible"
     )
     leaks = [s for s in selectors if pattern.search(s) and not is_app_scoped(s)]
     assert not leaks, f"这些规则没挂在 body.app 下，会漏进小工具窗：{leaks}"
@@ -920,6 +923,47 @@ WIDGET_PAIRS = (
     (".dot::before", "muted", "win"),
     *((f".dot.{s}::before", s, "card") for s in DOT_STATES),
     *((f".dot.{s}::before", s, "win") for s in DOT_STATES),
+    # ---- 票 #27：小标题、步骤卡、读数卡 ----
+    # 步骤卡平时直接摆在窗底上（左栏），当前态铺 card 底，所以卡里的字两种底都登记；
+    # 编号圆圈自己的底是 --win，圆圈的边与完成态的品牌块外侧挨着 win 或 card。
+    (".eyebrow", "muted", "card"),
+    (".eyebrow", "muted", "win"),
+    (".eyebrow .n", "text-dim", "card"),
+    (".eyebrow .n", "text-dim", "win"),
+    (".step.cur", "border", "card"),
+    (".step.cur", "border", "win"),
+    (".step .num i", "text-dim", "win"),
+    (".step .num i", "border-hover", "win"),
+    (".step .num i", "border-hover", "card"),
+    (".step.cur .num i", "text", "win"),
+    (".step.cur .num i", "brand", "win"),
+    (".step.cur .num i", "brand", "card"),
+    (".step.done .num i", "on-brand", "brand"),
+    (".step.done .num i", "brand", "win"),
+    (".step.done .num i", "brand", "card"),
+    (".step .title", "text", "win"),
+    (".step .title", "text", "card"),
+    (".step .meta", "muted", "win"),
+    (".step .meta", "muted", "card"),
+    (".step .meta b", "text-dim", "win"),
+    (".step .meta b", "text-dim", "card"),
+    *((f".step .meta.{k}", t, bg) for k, t in (("fail", "error"), ("hint", "warn"), ("good", "ok"))
+      for bg in ("win", "card")),
+    (".step.wait .num i, .step.wait .title, .step.wait .meta, .step.wait .meta b", "muted", "win"),
+    (".step.wait .num i, .step.wait .title, .step.wait .meta, .step.wait .meta b", "muted", "card"),
+    (".step .param > label", "text-dim", "win"),
+    (".step .param > label", "text-dim", "card"),
+    (".step[tabindex]:hover", "border-hover", "win"),
+    (".step[tabindex]:hover", "border-hover", "card"),
+    (".step:focus-visible", "info", "win"),
+    (".step:focus-visible", "info", "card"),
+    (".kpi .lbl", "muted", "card"),
+    (".kpi .val", "text", "card"),
+    (".kpi .val small", "muted", "card"),
+    (".kpi .sub", "text-dim", "card"),
+    (".kpi .sub span + span::before", "muted", "card"),
+    (".kpi .sub .dim", "muted", "card"),
+    (".kpi.warn .val", "warn", "card"),
 )
 
 COLOUR_PROPS_RE = re.compile(
@@ -1209,3 +1253,208 @@ def test_display_scan_is_not_blind():
     assert host_rules_declaring_display(".switch", css) == ["button.switch:hover"]
     assert host_rules_declaring_display(".icon", css) == []
     assert host_rules_declaring_display(".toolbar") == [".toolbar"]
+
+
+# ---------------------------------------------------------------------------
+# 票 #27：小标题 .eyebrow、步骤卡 .step、读数卡 .kpis / .kpi、整句列 td.wrap、
+# 主题切换按钮、文字可选。模版是第三个消费者（宽表格程序）的现行写法，另外
+# 两三个消费者抄过去后改好的地方择优合入。全是新类名，旧页面命中不到。
+# ---------------------------------------------------------------------------
+
+
+def test_eyebrow_is_a_small_caps_like_muted_row():
+    """区块小标题：一行排开、字小、字距拉开、弱化灰字；计数 .n 次要色不拉字距。"""
+    eyebrow = rule(".eyebrow")
+    assert "display: flex" in eyebrow and "align-items: center" in eyebrow
+    assert re.search(r"gap: var\(--space-\d\)", eyebrow)
+    assert "font-size: 11px" in eyebrow and "letter-spacing: .08em" in eyebrow
+    assert "color: var(--muted)" in eyebrow
+    count = rule(".eyebrow .n")
+    assert "color: var(--text-dim)" in count and "letter-spacing: 0" in count
+
+
+def test_eyebrow_title_never_wraps_under_a_long_note():
+    """标题 .t 不被后面的长说明挤成两行：不折行、不参与收缩。"""
+    title = rule(".eyebrow .t")
+    assert "white-space: nowrap" in title and "flex: none" in title
+
+
+def test_step_is_a_rounded_block_with_an_invisible_border_until_current():
+    """步骤卡平时没底没边（边框透明占位，切到当前态时不跳一像素）；当前态 .cur
+    是卡片底 + 分隔线边。"""
+    step = rule(".step")
+    assert "border: 1px solid transparent" in step
+    assert "border-radius: 10px" in step
+    cur = rule(".step.cur")
+    assert "background: var(--card)" in cur and "border-color: var(--border)" in cur
+
+
+def test_step_number_is_a_ring_that_fills_with_brand_when_done():
+    """编号圆圈：默认窗底 + 一圈 border-hover、次要色数字；当前态描边换品牌色、
+    数字主色；完成态整颗品牌色、数字走 --on-brand（浅色主题下品牌红底上的字
+    仍是白的，借道 --text 就成了红底黑字）。"""
+    ring = rule(".step .num i")
+    assert "border-radius: 999px" in ring
+    assert "border: 2px solid var(--border-hover)" in ring
+    assert "background: var(--win)" in ring and "color: var(--text-dim)" in ring
+    assert "font-style: normal" in ring
+    cur = rule(".step.cur .num i")
+    assert "border-color: var(--brand)" in cur and "color: var(--text)" in cur
+    done = rule(".step.done .num i")
+    assert "background: var(--brand)" in done and "border-color: var(--brand)" in done
+    assert "color: var(--on-brand)" in done
+
+
+def test_done_beats_current_by_source_order():
+    """`.step.cur .num i` 与 `.step.done .num i` 同分 (0,3,1)；既完成又是当前
+    的那一步（用户点回去看）编号要保持实心——完成态写在后面取胜。参考实现把
+    完成态写在前面，于是两个消费者各自补了一条 `.step.cur.done`。"""
+    assert rule_pos(".step.done .num i") > rule_pos(".step.cur .num i")
+
+
+def test_waiting_step_is_muted_by_colour_not_by_opacity():
+    """等待态换弱化前景，不用 opacity：半透明的字对比度闸门算不出来、会漏检。"""
+    for selector in all_selectors():
+        if ".step" in selector:
+            block = rule_containing(selector)
+            assert "opacity" not in block, f"{selector} 用了 opacity"
+    wait = rule(".step.wait .num i, .step.wait .title, .step.wait .meta, .step.wait .meta b")
+    assert "color: var(--muted)" in wait
+
+
+def rule_containing(selector: str) -> str:
+    """含这个选择器（在选择器列表里任一位置）的那条规则的声明块。"""
+    body = CSS_COMMENT_RE.sub("", BASE)
+    for head, block in re.findall(r"([^{};]+)\{([^{}]*)\}", body):
+        if selector in [part.strip() for part in head.split(",")]:
+            return block
+    raise AssertionError(f"base.css 里找不到含 {selector!r} 的规则")
+
+
+@pytest.mark.parametrize(("kind", "token"), [("fail", "error"), ("hint", "warn"), ("good", "ok")])
+def test_step_meta_has_three_semantic_colours(kind: str, token: str):
+    assert f"color: var(--{token})" in rule(f".step .meta.{kind}")
+
+
+def test_step_meta_is_a_small_muted_line_that_breaks_long_paths():
+    meta = rule(".step .meta")
+    assert "color: var(--muted)" in meta and "font-size: 12px" in meta
+    assert "overflow-wrap: anywhere" in meta, "说明行里常有长路径，不断开会撑破左栏"
+
+
+def test_step_actions_wrap_and_fill_the_narrow_rail():
+    """动作按钮行：窄左栏里自动折行、按钮占满宽度。"""
+    act = rule(".step .act")
+    assert "display: flex" in act and "flex-wrap: wrap" in act
+    assert re.search(r"gap: var\(--space-\d\)", act)
+    assert "flex: 1 1 auto" in rule(".step .act > button, .step .act > .btn")
+
+
+def test_step_param_stacks_label_above_a_full_width_input():
+    """参数行：标签在上、输入框占满（左栏放不下 .field 那种左右排）。"""
+    param = rule(".step .param")
+    assert "display: flex" in param and "flex-direction: column" in param
+    assert "color: var(--text-dim)" in rule(".step .param > label")
+    row = rule(".step .param .row")
+    assert "display: flex" in row
+    assert "min-width: 0" in rule(".step .param .row > input")
+
+
+def test_step_can_hold_a_progress_bar():
+    assert re.search(r"margin-top: var\(--space-\d\)", rule(".step progress"))
+
+
+def test_clickable_step_is_reachable_by_tab_with_the_app_focus_ring():
+    """可点的步骤卡写 tabindex="0"：手形光标、悬停换边；焦点环与 body.app 同一档
+    （小窗里没有 body.app 那条全局焦点环，这里自己带）。"""
+    assert "cursor: pointer" in rule(".step[tabindex]")
+    assert "border-color: var(--border-hover)" in rule(".step[tabindex]:hover")
+    assert rule(".step:focus-visible").strip() == rule("body.app :focus-visible").strip()
+
+
+def test_kpis_is_a_four_column_grid_that_drops_to_two_in_a_narrow_window():
+    kpis = rule(".kpis")
+    assert "display: grid" in kpis
+    assert "grid-template-columns: repeat(4, minmax(0, 1fr))" in kpis
+    assert re.search(r"gap: var\(--space-\d\)", kpis)
+    narrow = re.search(r"@media \(max-width: 900px\)\s*\{(.*?)\n\}", BASE, re.DOTALL)
+    assert narrow, "窄窗那段 @media 不见了"
+    assert re.search(r"\.kpis \{ grid-template-columns: 1fr 1fr; \}", narrow.group(1)), (
+        "窄窗（< 900px）读数卡该退到两列"
+    )
+
+
+def test_kpis_kills_the_card_rhythm_so_grid_cells_line_up():
+    """卡片套卡片（`<div class="card"><div class="kpis">…`）时 `.card > * + *`
+    不该落到格子上——同分 (0,1,1)，靠写在后面取胜（同 .actions / .field）。"""
+    assert re.search(r"margin-top:\s*0\s*;", rule(".kpis > * + *"))
+    assert rule_pos(".kpis > * + *") > rule_pos(".card > * + *")
+
+
+def test_kpi_card_has_label_value_and_sub_line():
+    """`<div class="card kpi"><div class="lbl">…</div><div class="val">128<small>件</small>
+    </div><div class="sub">…</div></div>`：小标签弱化、大数字等宽、副行次要色。"""
+    assert re.search(r"padding: var\(--space-\d\)", rule(".kpi"))
+    lbl = rule(".kpi .lbl")
+    assert "color: var(--muted)" in lbl and "letter-spacing: .08em" in lbl
+    val = rule(".kpi .val")
+    assert "font-size: 26px" in val and "font-variant-numeric: tabular-nums" in val
+    assert "color: var(--text)" in val
+    assert "color: var(--muted)" in rule(".kpi .val small")
+    assert "color: var(--text-dim)" in rule(".kpi .sub")
+
+
+def test_kpi_inner_spacing_outranks_the_card_rhythm():
+    """.val / .sub 是 .card 的直接子元素，`.card > * + *`（0,1,1）会给它们一整档
+    卡片行距；`.kpi .val`（0,2,0）分数更高，读数卡自己的紧凑间距说了算。"""
+    assert re.search(r"margin-top: var\(--space-\d\)", rule(".kpi .val"))
+    assert re.search(r"margin-top: var\(--space-\d\)", rule(".kpi .sub"))
+
+
+def test_kpi_empty_state_and_warning_state():
+    """空态：卡还在、数字写破折号、副行包 .dim 弱化；警示态：数字换警示色。"""
+    assert "color: var(--muted)" in rule(".kpi .sub .dim")
+    assert "color: var(--warn)" in rule(".kpi.warn .val")
+
+
+def test_sentence_column_in_a_grid_may_wrap():
+    """数据网格默认不折行（宽表靠横滚读）；放整句话的列（说明、路径、原因）给
+    单元格挂 td.wrap 就允许换行、长路径断开。`.grid td.wrap`（0,2,1）压过
+    `.grid td`（0,1,1），不靠顺序。"""
+    wrap = rule(".grid td.wrap")
+    assert "white-space: normal" in wrap
+    assert "overflow-wrap: anywhere" in wrap
+    assert re.search(r"min-width: \d+em", wrap), (
+        "anywhere 让最小内容宽度趋近一个字，不给下限的话这一列会被挤成一条竖线"
+    )
+
+
+def test_theme_toggle_shows_where_a_click_will_take_you():
+    """深浅切换按钮 `<button class="icon" data-theme-toggle>` 里放 .sun 与 .moon
+    两颗内联 svg：深色下显示太阳（点了去浅色）、浅色下显示月亮。显隐写在 svg 上，
+    按钮本体不写 display（hidden 照常收得起来）。"""
+    assert "display: none" in rule("[data-theme-toggle] .moon")
+    assert "display: none" in rule(':root[data-theme="light"] [data-theme-toggle] .sun')
+    assert "display: block" in rule(':root[data-theme="light"] [data-theme-toggle] .moon')
+    assert not host_rules_declaring_display("[data-theme-toggle]")
+
+
+CONTROLS_NOT_SELECTABLE = ("button", ".btn", ".seg", ".pill", ".chip", ".switch", "label")
+
+
+def test_controls_are_not_selectable_so_clicks_never_select_text():
+    """run() 默认放开文字选择（票 #27，#17）；按钮、分段、徽章、筛选片、开关、标签
+    这些点的东西声明不可选，点击时不误选中文字。"""
+    block = rule(", ".join(CONTROLS_NOT_SELECTABLE))
+    assert "-webkit-user-select: none" in block and "user-select: none" in block
+
+
+def test_base_never_forces_body_text_selectable():
+    """正文可不可选由 run(text_select=…) 决定；base.css 不许替它拍板——写了
+    `user-select: text` 的话，run(text_select=False) 就关不掉了。"""
+    assert "user-select: text" not in CSS_COMMENT_RE.sub("", BASE)
+
+
+def test_step_head_lines_up_the_number_and_the_title():
+    head = rule(".step .head")
+    assert "display: flex" in head and "align-items: center" in head

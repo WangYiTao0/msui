@@ -4,7 +4,8 @@
  *
  * 覆盖：排版、按钮、操作行、输入框、表单行、进度条、表格、卡片、模态对话框、
  * 提示条、日志区、空态、分段选择、徽章、进场动效、列表页 / 设置页部件（数据
- * 网格、工具条、筛选片、搜索框、图标按钮、开关、状态点）；外加 opt-in 的应用式版式
+ * 网格、工具条、筛选片、搜索框、图标按钮、开关、状态点）、左栏步骤卡、读数卡、
+ * 区块小标题、整句列、深浅切换按钮；外加 opt-in 的应用式版式
  * （`<body class="app">`：顶栏 / 多栏 / 状态栏，不挂开关的小工具窗一个像素不变）。
  * 两条原则：
  *   1. 语义化标签（button / input / table…）直接给默认样式，裸 HTML 就长对；
@@ -87,6 +88,13 @@ button.primary, .btn.primary {
   color: var(--on-brand); font-weight: 600;
 }
 button.primary:hover, .btn.primary:hover { background: var(--brand-down); }
+
+/* ---- 点的东西不可选（票 #27） ----
+   msui.shell.run 默认 text_select=True：页面文字（日志、告警、表格）能选中复制。
+   按钮、分段、徽章、筛选片、开关、标签这些「点的东西」声明不可选，点击、连点时
+   不误选中文字。**正文这里不写 user-select**：可不可选由 run(text_select=…) 决定，
+   这里写了 text，run(text_select=False) 就关不掉了。 */
+button, .btn, .seg, .pill, .chip, .switch, label { -webkit-user-select: none; user-select: none; }
 
 /* ---- 操作行：一组按钮横排 ----
    默认左对齐（一列文字流里，操作跟着左边缘走最好扫）；要居中再加 .center。
@@ -439,6 +447,11 @@ dialog > * + * { margin-top: var(--space-3); }
 .grid tr:last-child td { border-bottom: 0; }
 td.num, th.num { text-align: right; }
 .grid tbody tr.sel { background: var(--wash); box-shadow: inset 3px 0 0 var(--brand); }
+/* 整句列（票 #27）：说明、路径、原因这类放整句话的列，给单元格挂 td.wrap 就允许
+   换行、长路径在任意处断开，不吃上面那条 nowrap（(0,2,1) 压过 (0,1,1)，不靠顺序）。
+   min-width 是必需的：overflow-wrap: anywhere 会把这一列的最小内容宽度压到一个字，
+   别的列都不折行时它会被挤成一条竖线。 */
+.grid td.wrap { white-space: normal; overflow-wrap: anywhere; min-width: 16em; line-height: 1.5; }
 
 /* ---- 工具条 .toolbar + 筛选片 .chip ----
    `<div class="toolbar"><button class="chip on">全部<span class="n">128</span></button>
@@ -510,6 +523,16 @@ button.icon { width: 28px; height: 28px; padding: 0; }
 button.icon > svg { display: block; margin: auto; width: 16px; height: 16px; }
 .search button.icon { width: 20px; height: 20px; border: 0; }
 
+/* ---- 深浅切换按钮：button.icon 的一个标准写法（票 #27） ----
+   `<button class="icon" type="button" data-theme-toggle><svg class="sun" …/><svg class="moon" …/></button>`
+   页面在 <head> 里同步引用 tokens-light.css 与 theme.js（README §4），点击、
+   localStorage、title / aria-label 全归 theme.js。图标表示「点了会去哪」：深色下
+   显示太阳、浅色下显示月亮。显隐写在两颗 svg 上，按钮本体不写 display（同
+   button.icon）。两颗都是内联 svg + currentColor，不用 ☀ ☾ 这类字形（Windows 缺字）。 */
+[data-theme-toggle] .moon { display: none; }
+:root[data-theme="light"] [data-theme-toggle] .sun { display: none; }
+:root[data-theme="light"] [data-theme-toggle] .moon { display: block; }
+
 /* ---- 开关 button.switch：设置页的「开 / 关」 ----
    `<button class="switch" role="switch" aria-checked="false" aria-label="自动备份"></button>`
    页面点一下把 aria-checked 在 "true" / "false" 之间翻（长相只认这一个属性，
@@ -562,6 +585,125 @@ button.switch[aria-checked="true"]::after {
 .dot.warn::before { background: var(--warn); }
 .dot.info::before { background: var(--info); }
 .dot.error::before { background: var(--error); }
+
+/* ======== 左栏步骤卡 / 读数卡 / 小标题 / 整句列 / 深浅切换按钮（票 #27） ========
+   以第三个消费者（宽表格程序）的现行写法为模版，另外几个消费者抄过去后改好的
+   地方择优合入（等待态用弱化前景不用 opacity、步骤卡可 Tab + 焦点环、读数卡空态、
+   参数行、整句列）。与 .seg / .grid 同一性质：是部件不是版式，小窗与应用式都能
+   用；全是新类名，旧页面命中不到。 */
+
+/* ---- 区块小标题 .eyebrow ----
+   `<div class="eyebrow"><span class="t">运行记录</span><span class="n">12</span>
+   <span class="grow"></span><button>打开日志</button></div>`
+   卡片与左栏里给一块内容起个名：小字号、字距拉开、弱化灰字。计数 .n 用次要色、
+   不拉字距（数字拉开难读）；右侧按钮用现成的弹簧 .grow 推过去。标题包进 .t 就
+   不被后面的长说明挤成两行（不折行、不参与收缩）。 */
+.eyebrow {
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--muted);
+}
+.eyebrow .n { color: var(--text-dim); font-weight: 500; letter-spacing: 0; }
+.eyebrow .t { white-space: nowrap; flex: none; }
+
+/* ---- 左栏步骤卡 .step ----
+   `<div class="step cur" tabindex="0"><div class="head"><span class="num"><i>1</i></span>
+   <span class="title">读取数据</span></div><p class="meta">一句说明</p>
+   <div class="act"><button class="primary">读取</button></div></div>`
+   三态挂在 .step 上：.done 已完成（编号实心品牌色）、.cur 当前（卡片底 + 分隔线
+   边、编号描品牌色边）、.wait 等待（前一步没完成，整块换弱化前景）；都不挂就是
+   「可做未做」。既完成又是当前（点回去看）时两个都挂。
+   - 平时边框透明占位：切到当前态时不跳一像素；
+   - 编号圆圈的底是 --win：卡片在 .cur 态是 card 底，圆圈仍是「凿出来的」一颗；
+     完成态整颗 --brand、数字 --on-brand（对 brand 已在文字档登记）；
+   - **等待态不用 opacity**：半透明的字对比度闸门算不出来，会漏检。改成标题、
+     说明、编号统一换 --muted（对 card / win 都在弱化档登记）；里面的按钮该
+     disabled 就 disabled，那是按钮自己的事；
+   - `.step.cur .num i` 与 `.step.done .num i` 同分 (0,3,1)，**完成态写在后面**
+     取胜：既完成又是当前的那一步编号保持实心（有测试盯着顺序）。 */
+.step {
+  position: relative; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid transparent;
+  transition: background 150ms ease-out, border-color 150ms ease-out;
+}
+.step .head { display: flex; align-items: center; gap: var(--space-2); }
+.step .num { display: grid; place-items: center; }
+.step .num i {
+  display: grid; place-items: center;
+  width: 22px; height: 22px; border-radius: 999px;
+  border: 2px solid var(--border-hover); background: var(--win);
+  font-size: 11px; font-weight: 700; font-style: normal; color: var(--text-dim);
+  transition: background 150ms ease-out, border-color 150ms ease-out;
+}
+.step.cur { background: var(--card); border-color: var(--border); }
+.step.cur .num i { border-color: var(--brand); color: var(--text); }
+.step.done .num i { border-color: var(--brand); background: var(--brand); color: var(--on-brand); }
+.step .title {
+  display: flex; align-items: center; gap: var(--space-2);
+  font-size: 13px; font-weight: 600; color: var(--text);
+}
+/* 说明行：小字弱化，长路径断开不撑破左栏；里面的 <b> 是要点（次要色）。
+   三种语义色：.fail 失败、.hint 提示、.good 正常——一步跑完的结果一眼可见。
+   收放靠 hidden（这里不写 display）。 */
+.step .meta {
+  margin-top: var(--space-1); font-size: 12px; line-height: 1.5; color: var(--muted);
+  font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.step .meta b { color: var(--text-dim); font-weight: 500; }
+.step .meta.fail { color: var(--error); }
+.step .meta.hint { color: var(--warn); }
+.step .meta.good { color: var(--ok); }
+/* 等待态写在三种语义色之后：还没轮到的一步不该亮着上一轮留下的颜色。 */
+.step.wait .num i, .step.wait .title, .step.wait .meta, .step.wait .meta b { color: var(--muted); }
+/* 动作按钮行：窄左栏里自动折行，按钮撑满（两个按钮一行平分，放不下各占一行）。 */
+.step .act { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.step .act > button, .step .act > .btn { flex: 1 1 auto; }
+/* 卡内进度条：裸 <progress> 的长相（凹陷槽 + 品牌色填充）原样，只拉开一点。 */
+.step progress { margin-top: var(--space-2); }
+/* 参数行：标签在上、输入框占满——左栏宽度放不下 .field 那种左右排。
+   `<div class="param"><label for="a">起始月</label><input id="a">
+   <label for="b">目标</label><div class="row"><input id="b"><button>清空</button></div></div>`
+   输入框后面要跟按钮时包一层 .row。 */
+.step .param { display: flex; flex-direction: column; gap: var(--space-1); margin-top: var(--space-2); }
+.step .param > label { font-size: 12px; color: var(--text-dim); }
+.step .param .row { display: flex; gap: var(--space-2); }
+.step .param .row > input { flex: 1; min-width: 0; }
+/* 可点的步骤卡（点了切换主区）写 tabindex="0"、role="button"，Enter / 空格由
+   页面自己接。手形光标、悬停换边；焦点环与 body.app 那条同一档——小窗里没有
+   那条全局焦点环，这里自己带。 */
+.step[tabindex] { cursor: pointer; }
+.step[tabindex]:hover { border-color: var(--border-hover); }
+.step:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+
+/* ---- 读数卡 .kpis / .kpi：主区一排「小标签 + 大数字 + 单位 + 副行」 ----
+   `<div class="kpis"><div class="card kpi"><div class="lbl">候选</div>
+   <div class="val">128<small>件</small></div><div class="sub"><span>甲 96</span>
+   <span>乙 32</span></div></div>…</div>`
+   四列等宽；窄窗（< 900px）退到两列，在文件后面那段窄窗 @media 里。卡片本身就是
+   .card，这里只收紧内衬、定字号。
+   - 副行里并排的几个 <span> 之间自动加「·」分隔；
+   - **空态**（还没读取数据）：卡还在、.val 写破折号「—」、副行包一层 .dim 写一句
+     弱化提示——四张卡的位置本身在告诉人「这一轮会有这四个数」，不要把卡藏起来；
+   - **警示态** .kpi.warn：数字换 --warn。
+   `.kpi .val` / `.kpi .sub`（0,2,0）压过 `.card > * + *`（0,1,1），卡内用自己的紧凑
+   间距；`.kpis > * + *` 与 `.card > * + *` 同分、靠写在后面取胜（同 .actions），
+   卡片里再套一排读数卡时格子不会高低不齐。 */
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
+.kpis > * + * { margin-top: 0; }
+.kpi { padding: var(--space-3) 14px; }
+.kpi .lbl { font-size: 11px; font-weight: 600; letter-spacing: .08em; color: var(--muted); }
+.kpi .val {
+  margin-top: var(--space-1);
+  font-size: 26px; font-weight: 600; letter-spacing: .01em; line-height: 1.1;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+.kpi .val small { margin-left: var(--space-1); font-size: 12px; font-weight: 500; color: var(--muted); }
+.kpi .sub {
+  margin-top: var(--space-2); font-size: 12px; color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.kpi .sub span + span::before { content: "·"; margin: 0 6px; color: var(--muted); }
+.kpi .sub .dim { color: var(--muted); }
+.kpi.warn .val { color: var(--warn); }
 
 /* ---- 应用式版式（opt-in）：<body class="app"> 开启，整窗即容器 ----
    上面那套「body 就是容器」是给 560×520 小工具窗的：内容列停在
@@ -639,6 +781,7 @@ body.app .pane {
 /* ---- 窄窗（< 900px）：左栏退到上面 ----
    定宽左栏在窄窗里会把主区挤到只剩一条，改成上下排：.cols 竖排，左栏的右边线
    换成下边线、最高 40vh 自己滚（不然参数一多就把主区挤没了）。
+   读数卡 .kpis 在同一个断点退到两列（它是部件、小窗里也能用，所以不挂 body.app）。
    断点只能写字面量：@media 里不认 var()。 */
 @media (max-width: 900px) {
   body.app .cols { flex-direction: column; }
@@ -646,6 +789,7 @@ body.app .pane {
     flex: none; max-height: 40vh;
     border-right: 0; border-bottom: 1px solid var(--border);
   }
+  .kpis { grid-template-columns: 1fr 1fr; }
 }
 
 /* ---- 动效可关：系统偏好「减少动态效果」时全体静止 ---- */

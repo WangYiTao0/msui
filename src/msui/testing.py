@@ -331,6 +331,13 @@ class TokenPair:
 # 都登记着；日志区的底是 --win、字是 --text-dim，同样已在表内。
 # 换句话说这三样是**复用**登记项而不是绕过闸门——真新添一种实色底（比如给
 # 日志区换个自己的底色）时，就得在这里加条目。
+#
+# 票 #27 的步骤卡 / 读数卡 / 小标题同样全是复用：步骤卡的字画在 win（左栏）或
+# card（当前态）上，编号圆圈的底是 win、边是 border-hover / brand，完成态是
+# brand 块上的 on-brand 数字；**等待态改用 --muted 前景、不用 opacity**，正是为了
+# 让它落在「muted × win / card」这两条已登记的弱化档上（半透明的字闸门算不出来）；
+# 读数卡的警示数字是 warn × card。tests/test_layout.py 的 WIDGET_PAIRS 逐条核对
+# 「规则里真用了这个前景 + 这一对在本表里」。
 BASE_TOKEN_PAIRS: tuple[TokenPair, ...] = (
     # ---- 正文（4.5）：card 底 + card-hover 底 ----
     TokenPair("主文字 text（card 底）", "text", "card", TEXT_MINIMUM),

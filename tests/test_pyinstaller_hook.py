@@ -62,3 +62,17 @@ def test_hook_datas_combines_collect_data_files_and_copy_metadata():
     for call in calls:
         args = [a.value for a in call.args if isinstance(a, ast.Constant)]
         assert args == ["msui"], f"hook 调用的目标包应是 'msui'，实际：{args}"
+
+
+def test_every_landed_asset_is_a_data_file_the_hook_collects():
+    """hook 不逐文件列名，靠 `collect_data_files("msui")` 收「包目录里的非 .py
+    文件」。所以 copy_assets 要落的每一份资产（含票 #27 的 theme.js——msui 第一
+    份 JS 资产）都必须就躺在包目录里、且不是 .py / .pyc（那两种会被默认排除，
+    冻结产物里就收不到，运行时 asset_path 落回开发机路径、读不到）。"""
+    from msui import resources
+
+    package_dir = Path(resources.__file__).resolve().parent
+    assert "theme.js" in resources.ASSET_NAMES
+    for name in resources.ASSET_NAMES:
+        assert (package_dir / name).is_file(), f"包目录里没有 {name}"
+        assert Path(name).suffix not in {".py", ".pyc"}, f"{name} 会被 hook 排除"

@@ -1,9 +1,10 @@
 """样式资产的两态定位与 tokens 解析。
 
-这个模块管三份 css：`tokens.css`（唯一色源，见该文件头注释）、
+这个模块管三份 css 与一份 js：`tokens.css`（唯一色源，见该文件头注释）、
 `tokens-light.css`（官方浅色主题：只在 `:root[data-theme="light"]` 下覆写
-同名 token，消费者 opt-in）与 `base.css`（通用组件默认样式，色彩只许
-var(--…) 引用 tokens）。
+同名 token，消费者 opt-in）、`base.css`（通用组件默认样式，色彩只许
+var(--…) 引用 tokens）与 `theme.js`（深浅切换：读写 localStorage 的 `theme`
+键、开窗前设好主题，消费者 opt-in）。
 
 **资源定位是 dev / frozen 两态**：
 
@@ -31,6 +32,7 @@ __all__ = [
     "BASE_CSS_NAME",
     "BUNDLE_DIR",
     "TOKENS_CSS_NAME",
+    "THEME_JS_NAME",
     "TOKENS_LIGHT_CSS_NAME",
     "asset_datas",
     "asset_path",
@@ -47,14 +49,17 @@ _log = logging.getLogger(__name__)
 TOKENS_CSS_NAME = "tokens.css"
 TOKENS_LIGHT_CSS_NAME = "tokens-light.css"
 BASE_CSS_NAME = "base.css"
+THEME_JS_NAME = "theme.js"
 
 # 全部静态资产。**逐文件列名，不用目录通配**：目录通配会把 .py / __pycache__
 # 一起收进 datas，而且「收了哪些文件」就没有单一来源可查了。
 # 往包里新加静态资产必须同步进这里 —— tests/test_resources.py 与
 # tests/test_wheel.py 都盯着。
 # tokens-light.css 无条件跟着落地：没 <link> 它、或没打开 data-theme 开关的
-# 页面里它就是一份不起作用的文件，深色外观一个像素不变。
-ASSET_NAMES = (TOKENS_CSS_NAME, BASE_CSS_NAME, TOKENS_LIGHT_CSS_NAME)
+# 页面里它就是一份不起作用的文件，深色外观一个像素不变。theme.js（深浅切换，
+# 票 #27）同理：页面不 <script> 它就什么都不做。版本横幅是 `/* … */` 块注释，
+# 在 JS 里同样合法。
+ASSET_NAMES = (TOKENS_CSS_NAME, BASE_CSS_NAME, TOKENS_LIGHT_CSS_NAME, THEME_JS_NAME)
 
 # 冻结产物里这个包的相对目录（"msui"）。从 __package__ 算，不手抄：
 # PyInstaller datas 的目的地与运行时查找路径同出这一处。
@@ -125,7 +130,7 @@ def _copy_assets_into(target_dir: Path) -> None:
 
 
 def copy_assets(page_dir: str | Path, *, tempdir_fallback: bool = False) -> Path:
-    """把包内 tokens.css + base.css + tokens-light.css 复制到消费者的页面目录
+    """把包内 tokens.css + base.css + tokens-light.css + theme.js 复制到消费者的页面目录
     （每份头部预置 :func:`version_banner` 版本横幅），返回该开窗的目录。
 
     这是「出路二」的落地动作（小程序自己持有页面，msui 启动时把共享样式落

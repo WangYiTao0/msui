@@ -7,7 +7,7 @@
 
 本 README 就是消费者契约：下面五件事按顺序做，一个新的小程序仓从零到跑起来。
 所有代码块与 `examples/minimal/` 里的完整示例一字一致（有测试盯着不许漂移），
-放心整段照抄。
+放心整段照抄；标了「片段」的块是从示例文件里摘出的连续几行，同样有测试盯着。
 
 ## 1. 装
 
@@ -15,7 +15,7 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 两处版本号**：
 
 ```
-msui @ https://github.com/WangYiTao0/msui/releases/download/v0.10.0/msui-0.10.0-py3-none-any.whl
+msui @ https://github.com/WangYiTao0/msui/releases/download/v0.11.0/msui-0.11.0-py3-none-any.whl
 ```
 
 另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
@@ -61,7 +61,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.10.0"
+MSUI_PINNED = "0.11.0"
 
 
 class Api:
@@ -370,6 +370,72 @@ def make_smoke_script(serve_dir: Path):
         )
         drive.check(capped == "capped", f"宽窗里对话框该停在 --content-max 并居中，实测 {capped!r}")
         window.resize(560, 520)
+        # 文字可选：run() 默认 text_select=True，pywebview 不再往页面注入
+        # `body { user-select: none }`——正文选得中、复制得出；按钮这类点的东西由
+        # base.css 声明不可选。（WebKit 只认带前缀的那个属性，两个都读。）
+        selectable = drive.wait_js(
+            window,
+            "(() => { const us = el => { const cs = getComputedStyle(el);"
+            "   return cs.userSelect || cs.webkitUserSelect; };"
+            " const p = document.querySelector('p'); const b = document.querySelector('button');"
+            " if (!p || !b) return 'missing';"
+            " return (us(p) === 'none' ? 'text-locked ' : 'text-ok ')"
+            "   + (us(b) === 'none' ? 'button-ok' : 'button-selectable ' + us(b)); })()",
+            "text-ok button-ok",
+        )
+        drive.check(
+            selectable == "text-ok button-ok",
+            f"正文该可选、按钮该不可选，实测 {selectable!r}",
+        )
+        # 应用式页面（app-layout.html）：步骤卡、读数卡、深浅切换。换页后等新页面的
+        # 读数卡出现——旧页面没有 .kpis，不会把旧页面的 complete 误当成新页面的。
+        window.load_url(str(serve_dir / "app-layout.html"))
+        loaded = drive.wait_js(
+            window,
+            "document.readyState === 'complete' && !!document.querySelector('.kpis')"
+            " ? 'ready' : 'loading'",
+            "ready",
+        )
+        drive.check(loaded == "ready", f"app-layout.html 没加载出来，实测 {loaded!r}")
+        # 没存过偏好（这一趟 run 没给 storage_dir，localStorage 是空的）→ 开窗即浅色。
+        theme = drive.wait_js(
+            window, "document.documentElement.dataset.theme || 'dark'", "light"
+        )
+        drive.check(theme == "light", f"没存过偏好时该开窗即浅色，实测 {theme!r}")
+        # 步骤卡、读数卡真的吃到了 token 色（比的是浅色下页面实际解出来的值）。
+        # 放在切主题之前：步骤卡的底色带 transition，隐藏窗里 transition 不推进，
+        # 切完再读会读到过渡起点。
+        drive.check_token_style(window, ".step.cur", "backgroundColor", "card")
+        drive.check_token_style(window, ".step.done .num i", "backgroundColor", "brand")
+        drive.check_token_style(window, ".step.done .num i", "color", "on-brand")
+        drive.check_token_style(window, ".step.wait .title", "color", "muted")
+        drive.check_token_style(window, ".eyebrow", "color", "muted")
+        drive.check_token_style(window, ".kpi .val", "color", "text")
+        drive.check_token_style(window, ".kpi.warn .val", "color", "warn")
+        wrap = window.evaluate_js(
+            "(() => { const td = document.querySelector('.grid td.wrap');"
+            " return td ? getComputedStyle(td).whiteSpace : 'missing'; })()"
+        )
+        drive.check(wrap == "normal", f"整句列 td.wrap 该允许换行，实测 {wrap!r}")
+        # 主题按钮：点一次翻到深色（图标换成太阳、localStorage 存 ''、提示改成
+        # 「切换到浅色」），再点一次翻回浅色。
+        flips = window.evaluate_js(
+            "(() => { const b = document.querySelector('[data-theme-toggle]');"
+            " if (!b) return 'missing';"
+            " const shown = () => ['sun', 'moon'].filter(c =>"
+            "   getComputedStyle(b.querySelector('.' + c)).display !== 'none').join('+');"
+            " const state = () => { let saved; try { saved = localStorage.getItem('theme'); }"
+            "   catch (e) { saved = 'unavailable'; }"
+            "   return [document.documentElement.dataset.theme || 'dark', shown(),"
+            "     JSON.stringify(saved), b.getAttribute('aria-label')].join(' '); };"
+            " const before = state(); b.click(); const once = state(); b.click();"
+            " return [before, once, state()].join(' / '); })()"
+        )
+        want = (
+            "light moon null 切换到深色 / dark sun \"\" 切换到浅色"
+            " / light moon \"light\" 切换到深色"
+        )
+        drive.check(flips == want, f"主题按钮该翻转主题、图标与偏好，实测 {flips!r}")
         # 横幅钉版：落地 css 第一行 == "/* msui <钉的版本> */"。横幅只证明
         # css 落了地，「页面吃进去了」由上面 check_token_style 证明，两条各管一半。
         banner = (serve_dir / "tokens.css").read_text(encoding="utf-8").splitlines()[0]
@@ -404,15 +470,17 @@ if __name__ == "__main__":
 要点：
 
 - `copy_assets` **无条件覆盖**地把 `tokens.css` + `base.css` + `tokens-light.css`
-  落进页面目录并返回该开窗的目录——开窗一律用返回值，别写死 `page_dir`；
-  `tokens-light.css` 是可选的浅色主题（§4），页面不引用它就不起任何作用；
-- 这几份 css 不入仓、不手改（`pages/.gitignore` 把它们排除掉）；
+  + `theme.js` 落进页面目录并返回该开窗的目录——开窗一律用返回值，别写死
+  `page_dir`；`tokens-light.css`（浅色主题）与 `theme.js`（深浅切换）都是可选的
+  （§4），页面不引用它们就不起任何作用；
+- 这几份副本不入仓、不手改（`pages/.gitignore` 把它们排除掉）；
 - 钉版本的官方姿势就是上面的 `MSUI_PINNED` 常量 + 横幅断言：**钉死常量证明
   「产物带的确实是钉的这一版」，改读 `importlib.metadata` 只是回显装了哪版、
   永远绿**——升级 msui 时改两处（requirements 的 wheel URL + 这个常量），
   冒烟红了就是有一处忘了改；
 - `run(...)` 还收 `width/height/min_size`、`icon=`、`storage_dir=` +
-  `version=`（持久化与按版本清缓存）等关键字参数，按需加。
+  `version=`（持久化与按版本清缓存）、`text_select=`（页面文字能否选中复制，
+  默认 `True`）等关键字参数，按需加。
 
 ### 桥的页面侧：三件事
 
@@ -810,11 +878,16 @@ if __name__ == "__main__":
   拼满整窗，内容区各自滚，body 自己不滚。不挂 class="app" 的页面还是 560×520
   小工具窗那套（skeleton.html），一个像素不变。
   三段：
-  - 顶栏 <header class="top">：程序名 + 分段 .seg + 弹簧 .grow + 徽章 .pill；
+  - 顶栏 <header class="top">：程序名 + 分段 .seg + 弹簧 .grow + 徽章 .pill +
+    深浅切换按钮（button.icon[data-theme-toggle]，配 <head> 里的 tokens-light.css
+    与 theme.js；没存过偏好时开窗即浅色）；
   - 多栏 <div class="cols">：左栏 .rail 定宽（--rail-width）、主区 .pane 吃剩余
     宽度，两边各自滚；窄窗（< 900px）左栏自动退到上面。没有左栏的页面删掉
     <aside>，.pane 留着即可；
   - 状态栏 <footer class="status">：版本 / 数据目录 / 当前状态一条细栏。
+  左栏是一串步骤卡 .step（.done 已完成 / .cur 当前 / .wait 等待，卡里放说明
+  .meta、参数 .param、动作 .act、进度条），上面一行小标题 .eyebrow；主区一排读数卡
+  .kpis / .kpi（空态写破折号、警示态 .warn），数据网格里放整句话的列挂 td.wrap。
   进场动效给块挂 .fade-in，要错峰就在元素上写 style="--i: 序号"；系统开了
   「减少动态效果」时自动静止。用不上的整块删掉即可。
 -->
@@ -824,6 +897,8 @@ if __name__ == "__main__":
   <title>应用名</title>
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="tokens-light.css">
+  <script src="theme.js"></script>
 </head>
 <body class="app">
   <header class="top">
@@ -835,32 +910,75 @@ if __name__ == "__main__":
     <span class="grow"></span>
     <span class="pill info">2024-01-31</span>
     <span class="pill ok">已同步</span>
+    <button class="icon" type="button" data-theme-toggle aria-label="切换深色 / 浅色">
+      <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+      <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+    </button>
   </header>
   <div class="cols">
-    <aside class="rail">
-      <h2>参数</h2>
-      <div class="field">
-        <label for="src">数据目录</label>
-        <input id="src">
-        <button>浏览</button>
+    <aside class="rail" id="steps">
+      <div class="eyebrow"><span class="t">流程</span><span class="n">第 2 步 / 共 3 步</span></div>
+      <div class="step done" tabindex="0" role="button">
+        <div class="head"><span class="num"><i>1</i></span><span class="title">读取数据</span></div>
+        <p class="meta">已读 <b>6</b> 张表。</p>
+        <p class="meta good">全部识别成功。</p>
       </div>
-      <div class="actions">
-        <button class="primary">运行</button>
-        <button>重置</button>
+      <div class="step cur" tabindex="0" role="button">
+        <div class="head"><span class="num"><i>2</i></span><span class="title">设定范围</span></div>
+        <div class="param">
+          <label for="from">起始月</label>
+          <input id="from" placeholder="YYYY-MM">
+          <label for="src">数据目录</label>
+          <div class="row"><input id="src"><button>浏览</button></div>
+        </div>
+        <p class="meta hint">结束月留空 = 到最新一个月。</p>
+        <div class="act"><button class="primary">运行</button><button>重置</button></div>
+        <progress value="42" max="100"></progress>
+      </div>
+      <div class="step wait" tabindex="0" role="button">
+        <div class="head"><span class="num"><i>3</i></span><span class="title">导出</span></div>
+        <p class="meta">上一步跑完才能导出。</p>
+        <p class="meta fail" hidden>导出失败：目标文件被占用。</p>
+        <div class="act"><button disabled>导出结果</button></div>
       </div>
     </aside>
     <main class="pane">
       <h2>结果</h2>
       <p>主区自己滚；宽表格放这里，窗口拉多大就摊多宽。</p>
-      <div class="card fade-in" style="--i: 0">第一块</div>
-      <div class="card fade-in" style="--i: 1">第二块：错峰晚 40ms 进场</div>
-      <table>
-        <thead><tr><th>名称</th><th>状态</th></tr></thead>
-        <tbody>
-          <tr><td>条目一</td><td><span class="pill ok">完成</span></td></tr>
-          <tr><td>条目二</td><td><span class="pill warn">待确认</span></td></tr>
-        </tbody>
-      </table>
+      <div class="kpis">
+        <div class="card kpi fade-in" style="--i: 0">
+          <div class="lbl">合计</div>
+          <div class="val">128<small>件</small></div>
+          <div class="sub"><span>甲 96</span><span>乙 32</span></div>
+        </div>
+        <div class="card kpi fade-in" style="--i: 1">
+          <div class="lbl">已完成</div>
+          <div class="val">120<small>件</small></div>
+          <div class="sub">占合计 94%</div>
+        </div>
+        <div class="card kpi warn fade-in" style="--i: 2">
+          <div class="lbl">告警</div>
+          <div class="val">8<small>条</small></div>
+          <div class="sub">需要人工确认</div>
+        </div>
+        <div class="card kpi fade-in" style="--i: 3">
+          <div class="lbl">待导出</div>
+          <div class="val">—</div>
+          <div class="sub"><span class="dim">还没读取数据，先跑第 1 步。</span></div>
+        </div>
+      </div>
+      <div class="card fade-in" style="--i: 4">
+        <div class="eyebrow"><span class="t">明细</span><span class="n">2 条</span><span class="grow"></span><button>导出</button></div>
+        <div class="grid">
+          <table>
+            <thead><tr><th>名称</th><th>状态</th><th>说明</th></tr></thead>
+            <tbody>
+              <tr><td>条目一</td><td><span class="pill ok">完成</span></td><td class="wrap">按默认范围读取：D:/数据/2024/01/条目一_明细_最终版.xlsx</td></tr>
+              <tr><td>条目二</td><td><span class="pill warn">待确认</span></td><td class="wrap">数量与上一轮相差超过一成，请核对来源表后再导出。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </main>
   </div>
   <footer class="status">
@@ -880,6 +998,22 @@ if __name__ == "__main__":
         button.classList.toggle("on", on);
         button.setAttribute("aria-pressed", String(on));
       }
+    });
+    // 步骤卡：点一下（或 Tab 过去按 Enter / 空格）切成当前步；卡里的按钮、输入框照常用。
+    const steps = document.getElementById("steps");
+    const pick = (step) => {
+      for (const s of steps.querySelectorAll(".step")) s.classList.toggle("cur", s === step);
+    };
+    steps.addEventListener("click", (event) => {
+      if (event.target.closest("button, input")) return;
+      const step = event.target.closest(".step");
+      if (step) pick(step);
+    });
+    steps.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      if (!event.target.classList.contains("step")) return;
+      event.preventDefault();
+      pick(event.target);
     });
   </script>
 </body>
@@ -910,6 +1044,102 @@ if __name__ == "__main__":
 卡片、区块进场时要一点动静就挂 **`.fade-in`**（上浮 6px 淡入，240ms）；一组要
 错峰时在元素上写 `style="--i: 序号"`，每档晚 40ms。系统开了「减少动态效果」时
 自动静止、直接以终态出现，不用自己处理。
+
+### 左栏步骤卡、读数卡、小标题、整句列
+
+上面 app-layout.html 的左栏和主区里还用了五样部件（0.11.0 起）。和 `.seg` /
+`.pill` 一样**是部件不是版式**，小窗里也能用；全是新类名，没写过它们的页面
+一个像素不变。每样一段写法：
+
+**区块小标题 `.eyebrow`**——卡片与左栏里给一块内容起名。标题包进 `.t` 就不会
+被后面的长说明挤成两行；计数 `.n` 次要色；右侧按钮用 `.grow` 推过去：
+
+```html
+<!-- examples/minimal/pages/app-layout.html 片段 -->
+<div class="eyebrow"><span class="t">明细</span><span class="n">2 条</span><span class="grow"></span><button>导出</button></div>
+```
+
+**左栏步骤卡 `.step`**——编号圆圈、标题、一句说明、动作按钮：
+
+```html
+<!-- examples/minimal/pages/app-layout.html 片段 -->
+<div class="step cur" tabindex="0" role="button">
+  <div class="head"><span class="num"><i>2</i></span><span class="title">设定范围</span></div>
+  <div class="param">
+    <label for="from">起始月</label>
+    <input id="from" placeholder="YYYY-MM">
+    <label for="src">数据目录</label>
+    <div class="row"><input id="src"><button>浏览</button></div>
+  </div>
+  <p class="meta hint">结束月留空 = 到最新一个月。</p>
+  <div class="act"><button class="primary">运行</button><button>重置</button></div>
+  <progress value="42" max="100"></progress>
+</div>
+```
+
+- 三态挂在 `.step` 上：`.done` 已完成（编号实心品牌色）、`.cur` 当前（卡片底 +
+  描边）、`.wait` 等待（前一步没完成）；都不挂是「可做未做」。既完成又是当前
+  （用户点回去看）两个都挂，编号保持实心；
+- **等待态不用 opacity**：标题、说明、编号统一换 `--muted`，对比度闸门算得出来。
+  里面的按钮该 `disabled` 就写 `disabled`；
+- 说明行 `.meta` 小字弱化、长路径自动断开，里面 `<b>` 是要点；三种语义色
+  `.meta.fail`（失败）/ `.meta.hint`（提示）/ `.meta.good`（正常）；收放用 `hidden`；
+- 动作行 `.act`：窄左栏里自动折行、按钮撑满；
+- 参数行 `.param`：标签在上、输入框占满（左栏放不下 `.field` 那种左右排）；
+  输入框后面要跟按钮时包一层 `.row`；
+- 卡内直接放裸 `<progress>`；
+- 整块可点（点了切换主区）就写 `tabindex="0" role="button"`，Enter / 空格由页面
+  接（示例页尾部的脚本）：手形光标、悬停换边、焦点环与 `body.app` 同一档。
+
+**读数卡 `.kpis` / `.kpi`**——主区一排「小标签 + 大数字 + 单位 + 副行」，四列
+等宽、窄窗（< 900px）退到两列：
+
+```html
+<!-- examples/minimal/pages/app-layout.html 片段 -->
+<div class="kpis">
+  <div class="card kpi fade-in" style="--i: 0">
+    <div class="lbl">合计</div>
+    <div class="val">128<small>件</small></div>
+    <div class="sub"><span>甲 96</span><span>乙 32</span></div>
+  </div>
+  <div class="card kpi fade-in" style="--i: 1">
+    <div class="lbl">已完成</div>
+    <div class="val">120<small>件</small></div>
+    <div class="sub">占合计 94%</div>
+  </div>
+  <div class="card kpi warn fade-in" style="--i: 2">
+    <div class="lbl">告警</div>
+    <div class="val">8<small>条</small></div>
+    <div class="sub">需要人工确认</div>
+  </div>
+  <div class="card kpi fade-in" style="--i: 3">
+    <div class="lbl">待导出</div>
+    <div class="val">—</div>
+    <div class="sub"><span class="dim">还没读取数据，先跑第 1 步。</span></div>
+  </div>
+</div>
+```
+
+- 副行里并排的几个 `<span>` 之间自动加「·」；
+- **空态**：还没有数据时卡照样摆着，`.val` 写破折号「—」，副行包一层 `.dim`
+  写一句弱化提示——别把卡藏起来，卡的位置本身在告诉人「会有这几个数」；
+- **警示态** `.kpi.warn`：数字换警示色。
+
+**数据网格里的整句列 `td.wrap`**——`.grid` 的单元格默认不折行（宽表靠横滚读）；
+说明、路径、原因这类放整句话的列，给单元格挂 `class="wrap"` 就允许换行、长路径
+在任意处断开（最窄 16em，不会被挤成一条竖线）：
+
+```html
+<!-- examples/minimal/pages/app-layout.html 片段 -->
+<tr><td>条目二</td><td><span class="pill warn">待确认</span></td><td class="wrap">数量与上一轮相差超过一成，请核对来源表后再导出。</td></tr>
+```
+
+**深浅切换按钮**——顶栏右端那颗 `button.icon[data-theme-toggle]`，写法和接法见
+§4「深浅切换按钮」。
+
+**文字可选**：`run()` 默认让页面文字可以选中复制（日志、告警、表格里的字能贴给
+同事或 AI）；按钮、分段、徽章、筛选片、开关、`<label>` 由 base.css 声明不可选，
+点击时不会误选中文字。确实不想让文字可选的程序 `run(..., text_select=False)`。
 
 ### 列表页 / 设置页部件：工具条、筛选片、搜索框、数据网格、图标按钮、开关、状态点
 
@@ -1067,7 +1297,7 @@ const qty = row.cells[col("数量")].textContent;
 
 ### 浅色主题（opt-in）
 
-msui 自带一套官方浅色：`tokens-light.css`，`copy_assets` 每次启动和另外两份
+msui 自带一套官方浅色：`tokens-light.css`，`copy_assets` 每次启动和另外几份
 一起落进页面目录。它只在 `:root[data-theme="light"]` 下覆写同名颜色 token，
 组件样式一条不改——**不开开关就一个像素不变**，默认仍是深色。启用两步：
 
@@ -1098,6 +1328,42 @@ msui 自带一套官方浅色：`tokens-light.css`，`copy_assets` 每次启动�
   按页面实际的层叠合成（浅色下只写在 `:root` 的 override 会被浅色值压掉，闸门
   算的也是被压掉之后的颜色）；
 - 已知限制：Windows 原生标题栏开窗时染成深色的 `--win`，页面切浅色时它不跟着变。
+
+### 深浅切换按钮（opt-in，0.11.0 起）
+
+要让用户自己在深浅之间切，别写 localStorage 逻辑，用 msui 落下来的 `theme.js`
+加一颗标准按钮（app-layout.html 顶栏右端就是）：
+
+1. `<head>` 里在 `tokens-light.css` 之后**同步**引用（不加 `defer` / `async`）——
+   开窗前就把主题设好，不会先闪一下深色再变浅色：
+
+   ```html
+   <!-- examples/minimal/pages/app-layout.html 片段 -->
+   <link rel="stylesheet" href="tokens-light.css">
+   <script src="theme.js"></script>
+   ```
+
+2. 顶栏放这颗按钮（两颗内联 svg：深色下显示太阳、浅色下显示月亮——图标表示
+   「点了会去哪」；**不用 ☀ ☾ 这类字形**，Windows 缺字）：
+
+   ```html
+   <!-- examples/minimal/pages/app-layout.html 片段 -->
+   <button class="icon" type="button" data-theme-toggle aria-label="切换深色 / 浅色">
+     <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+     <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+   </button>
+   ```
+
+`theme.js` 管的事：
+
+- 偏好存在 localStorage 的 **`theme`** 键：`'light'` = 浅色，`''` = 用户选了深色，
+  **没存过按浅色处理**（第一次打开就是浅色）。全家同一个键、同一个默认；
+- 点按钮在两者之间翻，同时把按钮的 `title` / `aria-label` 写成「切换到浅色」/
+  「切换到深色」；
+- localStorage 读写不了时只管这一次，不报错；
+- **下次打开还记得，前提是 `run()` 给了 `storage_dir=`**：不给的话 pywebview 走
+  隐私模式，关窗即清掉 localStorage（而且每次开窗的页面来源都不同），每次都回到
+  默认浅色。
 
 ### 自己的版式：layout.css（默认不用）
 
@@ -1178,8 +1444,8 @@ spec 对 msui **零资源配置**——样式与版本元数据由包自带的 h
 # examples/minimal/app.spec
 # -*- mode: python ; coding: utf-8 -*-
 # 最小消费者的 PyInstaller spec。关键点：对 msui 的资源与元数据**零配置**——
-# tokens.css / base.css / tokens-light.css / dist-info 全由 msui 包自带的
-# pyinstaller40 hook 收齐。
+# tokens.css / base.css / tokens-light.css / theme.js / dist-info 全由 msui 包
+# 自带的 pyinstaller40 hook 收齐。
 # datas 只声明自己持有的页面目录。
 import os
 
@@ -1195,15 +1461,17 @@ a = Analysis(
     noarchive=False,
 )
 
-# 开发机上冒烟落地过的 tokens.css / base.css / tokens-light.css 副本
+# 开发机上冒烟落地过的 tokens.css / base.css / tokens-light.css / theme.js 副本
 # （gitignored、但在盘上）会被 pages/ 整目录收集顺手带进产物——纯冗余：运行时
 # copy_assets 每次启动都无条件覆盖，产物里那几份副本永远不会被用到。按目的地
 # 路径剔掉；CI 的干净 checkout 本来就没有它们，此过滤不改变 CI 产物。
-def _is_landed_css(dest: str) -> bool:
+def _is_landed_asset(dest: str) -> bool:
     parts = dest.replace("\\", "/").split("/")
-    return parts[0] == "pages" and parts[-1] in ("tokens.css", "base.css", "tokens-light.css")
+    return parts[0] == "pages" and parts[-1] in (
+        "tokens.css", "base.css", "tokens-light.css", "theme.js",
+    )
 
-a.datas = [entry for entry in a.datas if not _is_landed_css(entry[0])]
+a.datas = [entry for entry in a.datas if not _is_landed_asset(entry[0])]
 
 pyz = PYZ(a.pure)
 
@@ -1258,13 +1526,14 @@ null 被直接 `getComputedStyle`）时**不中断整场**——异常文本当�
 使然，不为失败开小灶）——所以探针尽量写成 null-safe（照上面 `.display`
 那段先判元素再取样式），元素缺席时报出的是 `missing` 而不是一串异常文本。
 
-msui 落进来的三份样式副本要挡在 git 外——`pages/.gitignore` 写这三行
-（仓里的唯一样式来源是 msui 包，副本入了仓就是漂移源）：
+msui 落进来的四份副本（三份样式 + `theme.js`）要挡在 git 外——`pages/.gitignore`
+写这四行（仓里的唯一来源是 msui 包，副本入了仓就是漂移源）：
 
 ```
 tokens.css
 base.css
 tokens-light.css
+theme.js
 ```
 
 ## 版本标记：产物里读得出带的是哪版 msui
@@ -1300,6 +1569,67 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
 宿主平台客户端列表里的图标是另一回事（接入契约 §3 的 `icon` 目前是死字段，
 等那侧功能定型），本节只管 exe 自己的图标。
 
+## 从 0.10.x 升到 0.11.0
+
+0.11.0 把几个小程序各自抄了一份的部件收回了 msui：步骤卡 `.step`、读数卡
+`.kpis` / `.kpi`、小标题 `.eyebrow`、整句列 `td.wrap`、深浅切换（`theme.js` +
+标准按钮），并且 `run()` 默认让页面文字可选。没用这些类名、没引用 `theme.js` 的
+页面，除了「文字能选中、点控件不误选」以外一个像素不变。升级时按下面做：
+
+1. **钉版本几处一起改**：`requirements.txt` 那行 wheel URL 里的两处版本号
+   （路径段 `v0.11.0` + 文件名 `msui-0.11.0-…`），加上冒烟里的 `MSUI_PINNED`
+   常量。漏改一处，冒烟的横幅断言就红；
+2. **`pages/.gitignore` 补一行 `theme.js`**（四行写法见上文「打包」一节末尾）；
+   **`.spec` 的副本过滤**文件名元组补上 `"theme.js"`（样板里这个函数改名叫
+   `_is_landed_asset`，旧名照用也行）；拿 `ASSET_NAMES` 对账这两处的测试会先红、
+   补齐转绿——别把测试期望改回写死的清单；
+3. **删掉本地那份重复样式**。重定义闸门 `test_own_css_never_redefines_base_selectors`
+   会逐条报出和 base.css 同名的选择器（`.eyebrow`、`.step`、`.step .num i`、
+   `.step.cur`、`.kpis`、`.kpi .val`、`button`……），照着删。**闸门报不出、也要删**
+   的几条（它们和 base.css 不是同一条选择器，留着会和新写法打架）：
+   - `.step.wait { opacity: … }`——等待态改成换 `--muted` 前景了，留着就是又淡又灰；
+   - `.step.cur.done .num i` / `.step.done.cur .num i`——base.css 里完成态已经压过当前态；
+   - `.step:hover`、`.step .act > button`、`.step .param …`、`.eyebrow .grow`、
+     `.card > .eyebrow + *`、`.kpi .val.changed` 这类自己补的：base.css 有同功能的
+     就删，确实是自己独有的（比如 `.kpi .val.changed`）留着；
+   - 主题图标的显隐：`button.icon .sun { display: none }`、
+     `:root[data-theme="light"] button.icon .sun / .moon`——**语义反过来了**（见第 4
+     条），留着会让图标显示错；
+   - 文字可选的硬压：`html body { user-select: text }` 删掉（`run()` 接手）；自己那串
+     `button, .seg, … { user-select: none }` **只删与 base.css 重合的项**（`button`、
+     `.btn`、`.seg`、`.pill`、`.chip`、`.switch`、`label`），自己独有的控件类留一条
+     `user-select: none`——例如包装排产的 `.nav, .set-tabs { -webkit-user-select: none;
+     user-select: none; }`，base.css 不认识它们；
+   - 读数卡不是四列的（例如一排五张）：别改 `.kpis`（闸门会红），给容器加一个自己的
+     类、用不同名的选择器写列数，**并自带窄窗那段**——它比 base.css 的 `.kpis` 更具体，
+     base.css 里窄窗退两列的那条压不过它：
+     `.kpis.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }` +
+     `@media (max-width: 900px) { .kpis.five { grid-template-columns: 1fr 1fr; } }`；
+   - 数据网格整句列的 `#某表 td.path, #某表 td.say { white-space: normal; … }` 改成
+     给单元格挂 `class="wrap"`；
+4. **改页面写法**：
+   - 步骤卡的头一行 `<div class="blk-head">` 改成 `<div class="head">`（或者把
+     `.blk-head` 留在自己的 layout.css 里，不冲突）；
+   - **编号圆圈画在 `<i>` 上**：`<span class="num"><i>1</i></span>`。圆圈直接画在
+     `.step .num` 上、头一行叫 `.step-head` 的写法（EHS 体检）要改两处：
+     `<div class="step-head">` → `<div class="head">`，`<span class="num">1</span>` →
+     `<span class="num"><i>1</i></span>`，再删掉自己的 `.step .num`、`.step-head` 规则。
+     EHS 原来的 `.step { display: flex; flex-direction: column; gap: … }` 是它自己的
+     卡内排法，要留就挂一个自己的类、换不同名的选择器写（比如 `<section class="step
+     stack">` + `.step.stack { … }`）——写回 `.step` 闸门会红；
+   - 深浅切换：删掉 `<head>` 里那段读 localStorage 的内联 `<script>` 和 app.js 里的
+     点击处理，换成 `<script src="theme.js"></script>` + 带 `data-theme-toggle` 的
+     标准按钮（§4「深浅切换按钮」）。图标改成**深色下显示太阳、浅色下显示月亮**
+     （「点了会去哪」），和旧的包装排产写法正好相反；
+5. **主题偏好会失效一次的程序**：偏好统一存在 localStorage 的 `theme` 键、没存过
+   按浅色。下面三个程序的用户升级后第一次打开会回到浅色，点一下就记住了——发版
+   说明里提一句——它们原来都用 `msui-theme` 键，新键 `theme` 里没有存过东西：
+   Counter、CIPData（原来没存过按深色，存 `"light"` 才浅色）、EHS 体检（深色存的是
+   `"dark"`；新约定里深色存 `""`）。要跨次记住，
+   `run()` 得给 `storage_dir=`；
+6. **文字可选**：`run()` 新参数 `text_select` 默认 `True`，什么都不用改；确实不想
+   让文字可选的程序显式传 `text_select=False`。
+
 ## 从 0.9.x 及更早升到 0.10.0
 
 0.10.0 起 `copy_assets` 每次启动多落一份 `tokens-light.css`（可选的浅色主题，
@@ -1329,7 +1659,7 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
 ```text
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
-   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.10.0/msui-0.10.0-py3-none-any.whl
+   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.11.0/msui-0.11.0-py3-none-any.whl
    另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
    要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
@@ -1338,14 +1668,20 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
    msui.shell.run(serve_dir / "index.html", title="应用名")。开窗一律用
    copy_assets 的返回值。
 3. 页面 <head> 依次相对引用 tokens.css、base.css。copy_assets 每次启动无条件
-   覆盖落下这两份外加可选的 tokens-light.css，三份都不入仓、不手改
-   （pages/.gitignore 排除它们）。
+   覆盖落下这两份外加可选的 tokens-light.css 与 theme.js，四份都不入仓、不手改
+   （pages/.gitignore 排除它们）。run() 默认 text_select=True（页面文字可选中
+   复制），按钮 / 分段 / 开关 / 标签由 base.css 声明不可选——不要自己写
+   user-select。
 4. HTML 直接写语义化标签（button/input/table/a/h1…），不写自定义配色；任何
    颜色只允许 var(--token) 引用，禁止手写十六进制色值。
 5. 换色（默认不需要）：pages/ 里加 override.css，只覆写 :root 里同名 token
    变量值，并在 base.css 之后 <link> 它。浅色主题（默认不开）：base.css 之后
    <link> tokens-light.css，再给 <html> 设 data-theme="light"；品牌色底上的
-   文字用 var(--on-brand)，不用 var(--text)。
+   文字用 var(--on-brand)，不用 var(--text)。要让用户切深浅：不写
+   localStorage 逻辑，<head> 里在 tokens-light.css 之后同步写
+   <script src="theme.js"></script>，顶栏放 msui README §4 那颗
+   <button class="icon" data-theme-toggle>（.sun / .moon 两颗内联 svg）。偏好存
+   localStorage 的 theme 键，没存过按浅色；跨次记住需要 run(storage_dir=…)。
 6. 测试加三条样式闸门（照抄 msui README 的 test_style_gate.py）：
    contrast_failures 对比度（theme_colors 深色、浅色各一遍）+ scan_stray_hex 防游离色值 +
    scan_base_redefinitions 不重定义 base.css 已有选择器。
@@ -1407,6 +1743,15 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
     不许重写 base.css 已有的选择器（button、.seg button、dialog……，闸门
     会红），配色只许 var(--token)。别的小程序也会要的部件不写这里——
     开票回 msui。
+18. 左栏流程与主区读数（从 msui README §3 的 app-layout.html 与「左栏步骤卡、
+    读数卡、小标题、整句列」一节起步，不自己写这些样式）：区块小标题
+    .eyebrow（标题包 .t、计数 .n）；步骤卡 .step > .head > .num > i + .title，
+    说明 .meta（.fail/.hint/.good），参数 .param（标签在上，输入框带按钮包
+    .row），动作 .act，卡内可放 <progress>；三态 .done/.cur/.wait（等待态是
+    弱化前景，**不用 opacity**），可点的卡写 tabindex="0" role="button"。读数卡
+    <div class="kpis"><div class="card kpi"> 里 .lbl / .val（单位 <small>）/
+    .sub，没数据时 .val 写「—」、副行包 .dim，告警态 .kpi.warn。数据网格里
+    整句话的列给单元格挂 class="wrap"。
 ```
 
 ## 发布（维护者）
