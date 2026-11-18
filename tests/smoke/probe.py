@@ -17,7 +17,8 @@
   ④ 票 #27 的部件与开关在真窗口里成立：第二页（widgets.html）上步骤卡、读数卡
      的 computedStyle 取到 token 色；没存偏好时开窗即浅色；点主题按钮后
      data-theme 翻转、图标切换、localStorage 写入；正文 user-select 不是 none、
-     按钮是 none；另起一份 `run(text_select=False)` 的副本，正文必须是 none。
+     按钮是 none；另起一份 `run(text_select=False)` 的副本，正文必须是 none；
+     再起两份共用临时 storage_dir 的副本：第一份点成深色，第二份开窗仍是深色。
 
 输出约定：最后一行 ``SMOKE-RESULT {json}``（全部读数），失败清单非空则
 退出码 1；watchdog 超时直接 os._exit(2)。所有 print 均 flush——冻结产物
@@ -29,6 +30,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -50,6 +52,13 @@ SECOND_INSTANCE_TIMEOUT = 60
 # 票 #27：「text_select=False 时正文不可选」要另开一扇窗验——同一进程里 run()
 # 只能起一次主循环。副本走环境变量开关，单例守卫关掉（主窗口正持有锁）。
 TEXT_SELECT_OFF_ENV = "MSUI_TEXT_SELECT_OFF"
+
+# spec #26 测试④「重开后保持」：主题偏好跨次开窗还在。两趟副本共用一个临时
+# storage_dir（run 给了它才不走隐私模式、localStorage 才落盘）：第一趟点成深色
+# 退出，第二趟开窗读 data-theme——没设 = 深色保持住了。环境变量的值是这一趟的
+# 角色（click / check），目录由 THEME_STORAGE_ENV 递过去。
+THEME_PERSIST_ENV = "MSUI_THEME_PERSIST"
+THEME_STORAGE_ENV = "MSUI_THEME_STORAGE"
 
 # 页面里读 user-select：WebKit 只认带前缀的那个属性，两个都读。
 _USER_SELECT_JS = (
@@ -156,12 +165,63 @@ def text_select_off_main() -> int:
     return 0
 
 
-def _spawn_self(env_name: str) -> subprocess.CompletedProcess:
+def theme_persist_main(role: str) -> int:
+    """副本模式：带 storage_dir 开窗。click 趟点一下主题按钮（浅 → 深）并核对
+    localStorage 已写 ''；check 趟只读开窗时的主题。各打一行 THEME-PERSIST。"""
+    seen: list[str] = []
+
+    def on_ready_persist(window) -> None:  # noqa: ANN001
+        try:
+            for _ in range(200):
+                if window.evaluate_js(
+                    "document.readyState === 'complete' && !!document.querySelector('.kpis')"
+                ):
+                    break
+                time.sleep(0.1)
+            if role == "click":
+                seen.append(str(window.evaluate_js(
+                    "(() => { const b = document.querySelector('[data-theme-toggle]');"
+                    " if (!b) return 'missing'; b.click();"
+                    " return (document.documentElement.dataset.theme || 'dark') + ' '"
+                    "   + JSON.stringify(localStorage.getItem('theme')); })()"
+                )))
+            else:
+                seen.append(str(window.evaluate_js(
+                    "document.documentElement.dataset.theme || 'dark'"
+                )))
+        finally:
+            window.destroy()
+
+    run(
+        page_dir() / "widgets.html",
+        title=f"msui-smoke-probe-theme-{role}",
+        hidden=True,
+        storage_dir=os.environ[THEME_STORAGE_ENV],
+        single_instance=False,
+        on_ready=on_ready_persist,
+    )
+    print(f"THEME-PERSIST {role} " + (seen[0] if seen else "never-ran"), flush=True)
+    return 0
+
+
+def _theme_persist_round(role: str, storage: str) -> str:
+    """跑一趟主题持久化副本，取回它那行读数（取不到回空串）。"""
+    done = _spawn_self(THEME_PERSIST_ENV, value=role, extra={THEME_STORAGE_ENV: storage})
+    prefix = f"THEME-PERSIST {role} "
+    line = next((ln for ln in done.stdout.splitlines() if ln.startswith(prefix)), "")
+    return line.removeprefix(prefix) or (
+        f"no-line rc={done.returncode} err={done.stderr.strip()[-200:]!r}"
+    )
+
+
+def _spawn_self(
+    env_name: str, *, value: str = "1", extra: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     """起一份自己（副本模式由环境变量选）。冻结态 sys.executable 就是 probe.exe 本身。"""
     argv = [sys.executable]
     if not getattr(sys, "frozen", False):
         argv.append(str(Path(__file__).resolve()))
-    env = {**os.environ, env_name: "1"}
+    env = {**os.environ, env_name: value, **(extra or {})}
     return subprocess.run(
         argv,
         env=env,
@@ -333,6 +393,16 @@ def on_ready(window) -> None:  # noqa: ANN001 - pywebview Window，探针不引�
             )
         except subprocess.TimeoutExpired:
             check("text_select_off_locks_text", False, "副本超时未退出")
+
+        # 重开后保持：第一趟点成深色、第二趟开窗仍是深色。
+        try:
+            with tempfile.TemporaryDirectory(prefix="msui-theme-") as storage:
+                first = _theme_persist_round("click", storage)
+                second = _theme_persist_round("check", storage)
+            check("theme_persists_click", first == 'dark ""', first)
+            check("theme_persists_reopen", second == "dark", second)
+        except subprocess.TimeoutExpired:
+            check("theme_persists_reopen", False, "副本超时未退出")
     except Exception:  # noqa: BLE001 - 探针要把任何炸法都带出窗口报出来
         failures.append("on_ready 崩了：\n" + traceback.format_exc())
     finally:
@@ -344,6 +414,8 @@ def main() -> int:
         return second_instance_main()
     if os.environ.get(TEXT_SELECT_OFF_ENV) == "1":
         return text_select_off_main()
+    if os.environ.get(THEME_PERSIST_ENV) in ("click", "check"):
+        return theme_persist_main(os.environ[THEME_PERSIST_ENV])
 
     watchdog = threading.Timer(
         TIMEOUT_SECONDS,
