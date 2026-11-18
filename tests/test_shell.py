@@ -392,6 +392,30 @@ def test_run_can_create_a_hidden_window(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 文字可选（票 #27，关 #17）：默认打开，可显式关掉
+# ---------------------------------------------------------------------------
+
+
+def test_run_lets_page_text_be_selected_by_default(monkeypatch):
+    """默认 text_select=True 递给 create_window。pywebview 自己的默认是 False
+    （会往页面注入 `body { user-select: none }`，日志、告警复制不出来），所以
+    这里断言的是**显式传了 True**，不是「没传」。"""
+    calls = _install_fake_webview(monkeypatch)
+    shell.run(PAGE, single_instance=False)
+
+    _args, kwargs = calls.create_window[0]
+    assert kwargs["text_select"] is True
+
+
+def test_run_can_turn_text_selection_off(monkeypatch):
+    calls = _install_fake_webview(monkeypatch)
+    shell.run(PAGE, text_select=False, single_instance=False)
+
+    _args, kwargs = calls.create_window[0]
+    assert kwargs["text_select"] is False
+
+
+# ---------------------------------------------------------------------------
 # 调用序列与注入钩子
 # ---------------------------------------------------------------------------
 

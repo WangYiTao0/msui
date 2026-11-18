@@ -1178,8 +1178,8 @@ spec 对 msui **零资源配置**——样式与版本元数据由包自带的 h
 # examples/minimal/app.spec
 # -*- mode: python ; coding: utf-8 -*-
 # 最小消费者的 PyInstaller spec。关键点：对 msui 的资源与元数据**零配置**——
-# tokens.css / base.css / tokens-light.css / dist-info 全由 msui 包自带的
-# pyinstaller40 hook 收齐。
+# tokens.css / base.css / tokens-light.css / theme.js / dist-info 全由 msui 包
+# 自带的 pyinstaller40 hook 收齐。
 # datas 只声明自己持有的页面目录。
 import os
 
@@ -1195,15 +1195,17 @@ a = Analysis(
     noarchive=False,
 )
 
-# 开发机上冒烟落地过的 tokens.css / base.css / tokens-light.css 副本
+# 开发机上冒烟落地过的 tokens.css / base.css / tokens-light.css / theme.js 副本
 # （gitignored、但在盘上）会被 pages/ 整目录收集顺手带进产物——纯冗余：运行时
 # copy_assets 每次启动都无条件覆盖，产物里那几份副本永远不会被用到。按目的地
 # 路径剔掉；CI 的干净 checkout 本来就没有它们，此过滤不改变 CI 产物。
-def _is_landed_css(dest: str) -> bool:
+def _is_landed_asset(dest: str) -> bool:
     parts = dest.replace("\\", "/").split("/")
-    return parts[0] == "pages" and parts[-1] in ("tokens.css", "base.css", "tokens-light.css")
+    return parts[0] == "pages" and parts[-1] in (
+        "tokens.css", "base.css", "tokens-light.css", "theme.js",
+    )
 
-a.datas = [entry for entry in a.datas if not _is_landed_css(entry[0])]
+a.datas = [entry for entry in a.datas if not _is_landed_asset(entry[0])]
 
 pyz = PYZ(a.pure)
 
@@ -1258,13 +1260,14 @@ null 被直接 `getComputedStyle`）时**不中断整场**——异常文本当�
 使然，不为失败开小灶）——所以探针尽量写成 null-safe（照上面 `.display`
 那段先判元素再取样式），元素缺席时报出的是 `missing` 而不是一串异常文本。
 
-msui 落进来的三份样式副本要挡在 git 外——`pages/.gitignore` 写这三行
-（仓里的唯一样式来源是 msui 包，副本入了仓就是漂移源）：
+msui 落进来的四份副本（三份样式 + `theme.js`）要挡在 git 外——`pages/.gitignore`
+写这四行（仓里的唯一来源是 msui 包，副本入了仓就是漂移源）：
 
 ```
 tokens.css
 base.css
 tokens-light.css
+theme.js
 ```
 
 ## 版本标记：产物里读得出带的是哪版 msui

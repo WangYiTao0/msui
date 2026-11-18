@@ -131,6 +131,7 @@ def run(
     storage_dir: str | Path | None = None,
     version: str | None = None,
     hidden: bool = False,
+    text_select: bool = True,
     single_instance: str | Literal[False],
     before_start: Callable[..., object] | None = None,
     on_ready: Callable[..., object] | None = None,
@@ -170,6 +171,13 @@ def run(
     `hidden`：窗口建起来但**不上屏**（`create_window(hidden=True)`），给
     无人值守验证用的缝；默认 False = 可见。注意隐藏模式下 rAF 停摆、CSS
     transition 不推进（macOS/WKWebView 实测），挂在动画终态上的断言不能指望它。
+
+    `text_select`：页面文字能不能选中复制，原样递给 ``create_window``；默认
+    **True**。pywebview 自己的默认是 False——它会往页面注入
+    ``body { user-select: none }``（``webview/js/customize.js``），日志、告警
+    就复制不出来，消费者只好各自在 CSS 里硬压（票 #17）。按钮、分段、开关、
+    标签这些控件「点击时不误选中」由 base.css 自己声明 ``user-select: none``，
+    不靠这个开关。确实不想让文字可选的程序传 False。
 
     `before_start(window)`：窗口**已建、主循环未起**那个空档里的钩子，在
     **主线程**上同步调用。必须先于循环存在的东西（比如托盘）挂这里：早于
@@ -236,6 +244,7 @@ def run(
         height=height,
         min_size=min_size,
         hidden=hidden,
+        text_select=text_select,
     )
 
     # 标题栏深色化：挂在 before_show 上——winforms 在 Form.__init__ 里就创建了

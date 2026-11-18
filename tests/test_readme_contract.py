@@ -84,11 +84,12 @@ def test_example_msui_pinned_matches_current_version():
 
 
 def test_landed_copies_are_kept_out_of_git_and_out_of_the_bundle_everywhere():
-    """copy_assets 落进页面目录的每一份 css，三处都要点名（票 #23 加了第三份）。
+    """copy_assets 落进页面目录的每一份资产，三处都要点名（票 #23 加了第三份
+    css，票 #27 加了第一份 js）。
 
     - 示例 `pages/.gitignore`：副本不入仓；
     - README 里给消费者抄的那段 .gitignore 块：同上，别人照着它写；
-    - 示例 app.spec 的 `_is_landed_css` 过滤：冒烟留在盘上的副本不进产物。
+    - 示例 app.spec 的 `_is_landed_asset` 过滤：冒烟留在盘上的副本不进产物。
     清单的单一来源是 `resources.ASSET_NAMES`——往包里加资产忘了改这三处当场红。
     """
     from msui.resources import ASSET_NAMES
@@ -104,11 +105,11 @@ def test_landed_copies_are_kept_out_of_git_and_out_of_the_bundle_everywhere():
     }
     assert listed == expected, f"pages/.gitignore 列的是 {listed}"
 
-    blocks = re.findall(r"```\n((?:[a-z-]+\.css\n)+)```", README)
-    assert len(blocks) == 1, "README 里应恰好有一段纯 css 文件名的 .gitignore 块"
+    blocks = re.findall(r"```\n((?:[a-z-]+\.(?:css|js)\n)+)```", README)
+    assert len(blocks) == 1, "README 里应恰好有一段纯资产文件名的 .gitignore 块"
     assert set(blocks[0].split()) == expected
 
     spec = (REPO_ROOT / "examples/minimal/app.spec").read_text(encoding="utf-8")
     match = re.search(r"parts\[-1\] in \(([^)]*)\)", spec)
-    assert match, "app.spec 里找不到 _is_landed_css 的文件名清单"
+    assert match, "app.spec 里找不到 _is_landed_asset 的文件名清单"
     assert set(re.findall(r'"([^"]+)"', match.group(1))) == expected
