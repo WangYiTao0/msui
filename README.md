@@ -7,7 +7,7 @@
 
 本 README 就是消费者契约：下面五件事按顺序做，一个新的小程序仓从零到跑起来。
 所有代码块与 `examples/minimal/` 里的完整示例一字一致（有测试盯着不许漂移），
-放心整段照抄。
+放心整段照抄；标了「片段」的块是从示例文件里摘出的连续几行，同样有测试盯着。
 
 ## 1. 装
 
@@ -1055,12 +1055,14 @@ if __name__ == "__main__":
 被后面的长说明挤成两行；计数 `.n` 次要色；右侧按钮用 `.grow` 推过去：
 
 ```html
+<!-- examples/minimal/pages/app-layout.html 片段 -->
 <div class="eyebrow"><span class="t">明细</span><span class="n">2 条</span><span class="grow"></span><button>导出</button></div>
 ```
 
 **左栏步骤卡 `.step`**——编号圆圈、标题、一句说明、动作按钮：
 
 ```html
+<!-- examples/minimal/pages/app-layout.html 片段 -->
 <div class="step cur" tabindex="0" role="button">
   <div class="head"><span class="num"><i>2</i></span><span class="title">设定范围</span></div>
   <div class="param">
@@ -1093,14 +1095,28 @@ if __name__ == "__main__":
 等宽、窄窗（< 900px）退到两列：
 
 ```html
+<!-- examples/minimal/pages/app-layout.html 片段 -->
 <div class="kpis">
-  <div class="card kpi">
+  <div class="card kpi fade-in" style="--i: 0">
     <div class="lbl">合计</div>
     <div class="val">128<small>件</small></div>
     <div class="sub"><span>甲 96</span><span>乙 32</span></div>
   </div>
-  <div class="card kpi warn"><div class="lbl">告警</div><div class="val">8<small>条</small></div><div class="sub">需要人工确认</div></div>
-  <div class="card kpi"><div class="lbl">待导出</div><div class="val">—</div><div class="sub"><span class="dim">还没读取数据，先跑第 1 步。</span></div></div>
+  <div class="card kpi fade-in" style="--i: 1">
+    <div class="lbl">已完成</div>
+    <div class="val">120<small>件</small></div>
+    <div class="sub">占合计 94%</div>
+  </div>
+  <div class="card kpi warn fade-in" style="--i: 2">
+    <div class="lbl">告警</div>
+    <div class="val">8<small>条</small></div>
+    <div class="sub">需要人工确认</div>
+  </div>
+  <div class="card kpi fade-in" style="--i: 3">
+    <div class="lbl">待导出</div>
+    <div class="val">—</div>
+    <div class="sub"><span class="dim">还没读取数据，先跑第 1 步。</span></div>
+  </div>
 </div>
 ```
 
@@ -1114,7 +1130,8 @@ if __name__ == "__main__":
 在任意处断开（最窄 16em，不会被挤成一条竖线）：
 
 ```html
-<td class="wrap">数量与上一轮相差超过一成，请核对来源表后再导出。</td>
+<!-- examples/minimal/pages/app-layout.html 片段 -->
+<tr><td>条目二</td><td><span class="pill warn">待确认</span></td><td class="wrap">数量与上一轮相差超过一成，请核对来源表后再导出。</td></tr>
 ```
 
 **深浅切换按钮**——顶栏右端那颗 `button.icon[data-theme-toggle]`，写法和接法见
@@ -1321,6 +1338,7 @@ msui 自带一套官方浅色：`tokens-light.css`，`copy_assets` 每次启动�
    开窗前就把主题设好，不会先闪一下深色再变浅色：
 
    ```html
+   <!-- examples/minimal/pages/app-layout.html 片段 -->
    <link rel="stylesheet" href="tokens-light.css">
    <script src="theme.js"></script>
    ```
@@ -1329,6 +1347,7 @@ msui 自带一套官方浅色：`tokens-light.css`，`copy_assets` 每次启动�
    「点了会去哪」；**不用 ☀ ☾ 这类字形**，Windows 缺字）：
 
    ```html
+   <!-- examples/minimal/pages/app-layout.html 片段 -->
    <button class="icon" type="button" data-theme-toggle aria-label="切换深色 / 浅色">
      <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
      <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
