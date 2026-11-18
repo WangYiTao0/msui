@@ -1595,20 +1595,37 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
    - 主题图标的显隐：`button.icon .sun { display: none }`、
      `:root[data-theme="light"] button.icon .sun / .moon`——**语义反过来了**（见第 4
      条），留着会让图标显示错；
-   - 文字可选的硬压：`html body { user-select: text }` 和自己那串
-     `button, .seg, … { user-select: none }`——删掉，`run()` 与 base.css 接手；
+   - 文字可选的硬压：`html body { user-select: text }` 删掉（`run()` 接手）；自己那串
+     `button, .seg, … { user-select: none }` **只删与 base.css 重合的项**（`button`、
+     `.btn`、`.seg`、`.pill`、`.chip`、`.switch`、`label`），自己独有的控件类留一条
+     `user-select: none`——例如包装排产的 `.nav, .set-tabs { -webkit-user-select: none;
+     user-select: none; }`，base.css 不认识它们；
+   - 读数卡不是四列的（例如一排五张）：别改 `.kpis`（闸门会红），给容器加一个自己的
+     类、用不同名的选择器写列数，**并自带窄窗那段**——它比 base.css 的 `.kpis` 更具体，
+     base.css 里窄窗退两列的那条压不过它：
+     `.kpis.five { grid-template-columns: repeat(5, minmax(0, 1fr)); }` +
+     `@media (max-width: 900px) { .kpis.five { grid-template-columns: 1fr 1fr; } }`；
    - 数据网格整句列的 `#某表 td.path, #某表 td.say { white-space: normal; … }` 改成
      给单元格挂 `class="wrap"`；
 4. **改页面写法**：
    - 步骤卡的头一行 `<div class="blk-head">` 改成 `<div class="head">`（或者把
      `.blk-head` 留在自己的 layout.css 里，不冲突）；
+   - **编号圆圈画在 `<i>` 上**：`<span class="num"><i>1</i></span>`。圆圈直接画在
+     `.step .num` 上、头一行叫 `.step-head` 的写法（EHS 体检）要改两处：
+     `<div class="step-head">` → `<div class="head">`，`<span class="num">1</span>` →
+     `<span class="num"><i>1</i></span>`，再删掉自己的 `.step .num`、`.step-head` 规则。
+     EHS 原来的 `.step { display: flex; flex-direction: column; gap: … }` 是它自己的
+     卡内排法，要留就挂一个自己的类、换不同名的选择器写（比如 `<section class="step
+     stack">` + `.step.stack { … }`）——写回 `.step` 闸门会红；
    - 深浅切换：删掉 `<head>` 里那段读 localStorage 的内联 `<script>` 和 app.js 里的
      点击处理，换成 `<script src="theme.js"></script>` + 带 `data-theme-toggle` 的
      标准按钮（§4「深浅切换按钮」）。图标改成**深色下显示太阳、浅色下显示月亮**
      （「点了会去哪」），和旧的包装排产写法正好相反；
 5. **主题偏好会失效一次的程序**：偏好统一存在 localStorage 的 `theme` 键、没存过
-   按浅色。原来用别的键（Counter 用的是 `msui-theme`）或默认深色的程序，升级后
-   第一次打开会回到浅色，用户点一下就记住了——发版说明里提一句；要跨次记住，
+   按浅色。下面三个程序的用户升级后第一次打开会回到浅色，点一下就记住了——发版
+   说明里提一句——它们原来都用 `msui-theme` 键，新键 `theme` 里没有存过东西：
+   Counter、CIPData（原来没存过按深色，存 `"light"` 才浅色）、EHS 体检（深色存的是
+   `"dark"`；新约定里深色存 `""`）。要跨次记住，
    `run()` 得给 `storage_dir=`；
 6. **文字可选**：`run()` 新参数 `text_select` 默认 `True`，什么都不用改；确实不想
    让文字可选的程序显式传 `text_select=False`。
