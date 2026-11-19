@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import url2pathname
 
 import pytest
 
@@ -301,7 +303,7 @@ def test_open_doc_on_windows_goes_through_a_redirect_page_keeping_the_anchor(tmp
 
     assert result["opened"] is True and "#" in result["url"]
     assert opened[0] != result["url"]
-    redirect = Path(docgen.unquote(docgen.urlsplit(opened[0]).path))
+    redirect = Path(url2pathname(urlsplit(opened[0]).path))
     assert result["url"] in redirect.read_text(encoding="utf-8")
 
 
@@ -384,5 +386,5 @@ def test_open_doc_on_windows_uses_a_fresh_redirect_page_each_time(tmp_path, monk
     first = docgen.open_doc(a, "x", opener=opened.append)
     docgen.open_doc(b, "y", opener=opened.append)
     assert opened[0] != opened[1]
-    redirect = Path(docgen.unquote(docgen.urlsplit(opened[0]).path))
+    redirect = Path(url2pathname(urlsplit(opened[0]).path))
     assert first["url"] in redirect.read_text(encoding="utf-8")
