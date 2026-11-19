@@ -20,6 +20,7 @@ from msui import testing as msui_testing
 from msui.resources import (
     ASSET_NAMES,
     BASE_CSS_NAME,
+    RUNLOG_JS_NAME,
     THEME_JS_NAME,
     TOKENS_CSS_NAME,
     TOKENS_LIGHT_CSS_NAME,
@@ -596,9 +597,9 @@ def test_scan_catches_every_hex_shape(tmp_path: Path):
 
 
 def test_scan_skips_the_landed_copies_by_default(tmp_path: Path):
-    """允许清单 = tokens.css / tokens-light.css / base.css / theme.js 四份副本 + override.css。
+    """允许清单 = tokens.css / tokens-light.css / base.css / theme.js / runlog.js 五份副本 + override.css。
 
-    copy_assets 把包里三份 css + theme.js 落进消费者的页面目录、消费者再放一份改色的
+    copy_assets 把包里三份 css + theme.js + runlog.js 落进消费者的页面目录、消费者再放一份改色的
     override.css，这几份里合法地含着 hex；包内文件的干净由包自己的 CI 把关，
     不用消费者管。tokens-light.css 不在清单里的话，消费者升级之后闸门当场红
     在一份不归他管的文件上。
@@ -608,6 +609,7 @@ def test_scan_skips_the_landed_copies_by_default(tmp_path: Path):
         TOKENS_LIGHT_CSS_NAME,
         BASE_CSS_NAME,
         THEME_JS_NAME,
+        RUNLOG_JS_NAME,
         "override.css",
     }
     # 由 ASSET_NAMES 派生：新增落地资产时允许清单自动跟上，不必散改

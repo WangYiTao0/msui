@@ -338,6 +338,14 @@ class TokenPair:
 # 让它落在「muted × win / card」这两条已登记的弱化档上（半透明的字闸门算不出来）；
 # 读数卡的警示数字是 warn × card。tests/test_layout.py 的 WIDGET_PAIRS 逐条核对
 # 「规则里真用了这个前景 + 这一对在本表里」。
+#
+# 票 #29 的运行日志区同样全是复用、没有新组合：滚动区自己铺 --win 实色底，时间
+# muted、等级 info / warn / error、正文 text、组头名称 text、状态字（已停止 text-dim）、
+# 结果 text-dim / error 全画在 win 上；失败行 / 失败组的 --error-bg 与组头悬停的
+# --wash 是半透明晕染，透出来的还是 win；外框 --border 挨着 card 或 win。
+# 注意这是**按 .notice 惯例只算 win**，没算叠色后的实际底：审查实测浅色下 error 字
+# 叠在 --error-bg 上只有 4.29（< 4.5），悬停叠 --wash 3.86；深色下 muted 时间叠色后
+# 3.34 / 2.80。本票不改样式，修复另开票跟进。
 BASE_TOKEN_PAIRS: tuple[TokenPair, ...] = (
     # ---- 正文（4.5）：card 底 + card-hover 底 ----
     TokenPair("主文字 text（card 底）", "text", "card", TEXT_MINIMUM),

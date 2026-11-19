@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <!--
-  冻结冒烟探针的第二页（票 #27）：步骤卡、读数卡、深浅切换按钮、文字可选。
-  tokens-light.css / theme.js 与另外两份一样由 copy_assets 落进本目录、不入仓。
+  冻结冒烟探针的第二页（票 #27）：步骤卡、读数卡、深浅切换按钮、文字可选；
+  票 #29 的运行日志区（按 data-runlog="get_log" 轮询探针的 RunLog）。
+  tokens-light.css / theme.js / runlog.js 与另外两份一样由 copy_assets 落进本目录、不入仓。
   探针在第一页读完之后 load_url 到这一页：没存过偏好 → 开窗即浅色，所以这一页
   的读数一律跟页面自己解出来的 token 值比，不写死深色的十六进制。
 -->
@@ -36,7 +37,12 @@
         <div class="card kpi"><div class="lbl">合计</div><div class="val">128</div></div>
         <div class="card kpi warn"><div class="lbl">告警</div><div class="val">8</div></div>
       </div>
+      <section class="runlog" data-runlog="get_log" aria-label="运行日志">
+        <div class="eyebrow"><span class="t">运行日志</span><span class="n" data-runlog-count></span><span class="grow"></span><button type="button" data-runlog-clear>清空显示</button><button type="button" data-runlog-toggle aria-expanded="true">折叠</button></div>
+        <div class="runlog-list" data-runlog-list></div>
+      </section>
     </main>
   </div>
+  <script src="runlog.js"></script>
 </body>
 </html>

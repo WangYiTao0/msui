@@ -39,6 +39,8 @@ pip install pytest
 三步：定位页面目录 → copy_assets 落共享样式 → run 开窗。
 页面要调 Python 时把 js_api 对象递给 run（方法包 Serializer：连点丢弃、
 不排队），页面那半边的写法见 pages/index.html 尾部的 <script>。
+运行日志：建一个 RunLog，业务里 info / warn / error 记行、start_run / end_run
+分组；js_api 上放一个 get_log 把 since() 原样转给页面的日志区（app-layout.html）。
 `single_instance` 必填——只开一扇窗是默认模式，值用小程序自己的 id（全局
 唯一）：用户连点图标时第二个进程把已开的窗带到前台、自己静默退出。真要
 多开得显式写 `single_instance=False`，漏传当场 TypeError。
@@ -55,6 +57,7 @@ from pathlib import Path
 
 from msui.bridge import Serializer
 from msui.resources import copy_assets
+from msui.runlog import RunLog
 from msui.shell import run
 from msui.testing import SmokeDriver
 
@@ -72,12 +75,37 @@ class Api:
     {"busy": True, ...}，绝不排队——连点五下不会攒成一队。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, runlog: RunLog) -> None:
         self._serial = Serializer()
+        self._runlog = runlog
 
     def ping(self) -> dict:
         """页面调一次拿一句应答：{"busy": False, "data": "pong 来自 Python"}。"""
         return self._serial.run(lambda: "pong 来自 Python")
+
+    def get_log(self, since: int = 0) -> dict:
+        """日志区每半秒调一次：since 之后的新行与运行变化。不包 Serializer——
+        RunLog 自己线程安全，取日志不该被正在跑的业务动作挡成「忙」。"""
+        return self._runlog.since(since)
+
+
+def demo_log(runlog: RunLog) -> None:
+    """示例先记几条，打开 app-layout.html 就看得到日志区的样子；自己的程序在
+    真的业务动作里记（后台线程里记也行）。"""
+    runlog.info("程序已启动")
+    runlog.start_run("读取数据")
+    runlog.info("读到 6 张表。")
+    runlog.end_run("ok", "6 张表全部识别成功")
+    runlog.start_run("导出")
+    runlog.warn("数量与上一轮相差超过一成。")
+    runlog.error(
+        "目标文件被占用，写不进去："
+        "D:/数据/2024/01/导出结果_最终版_请勿改名_条目一与条目二合并_sample-0001_20240131.xlsx"
+    )
+    runlog.end_run("error", "导出失败：目标文件被占用")
+    runlog.start_run("重新读取")
+    runlog.info("读到 6 张表。")
+    runlog.end_run("ok", "完成")
 
 
 def page_dir() -> Path:
@@ -87,7 +115,7 @@ def page_dir() -> Path:
     return Path(__file__).resolve().parent / "pages"
 
 
-def make_smoke_script(serve_dir: Path):
+def make_smoke_script(serve_dir: Path, runlog: RunLog):
     """造冒烟脚本（跑在 pywebview 后台线程）：桥往返、样式生效、版式地基、
     操作行/表单行/进度条/提示条/日志区/模态对话框的实测长相、横幅钉版。
 
@@ -417,6 +445,51 @@ def make_smoke_script(serve_dir: Path):
             " return td ? getComputedStyle(td).whiteSpace : 'missing'; })()"
         )
         drive.check(wrap == "normal", f"整句列 td.wrap 该允许换行，实测 {wrap!r}")
+        # 运行日志区：三组到齐后，最早的成功组收起、失败组展开、最新组展开；
+        # 失败组铺 --error-bg；长行真的换行、不横滚；正文选得中。
+        groups = drive.wait_js(
+            window,
+            "[...document.querySelectorAll('.runlog-run')].map(g =>"
+            " (g.querySelector('.runlog-lines').hidden ? 'closed' : 'open')"
+            " + ':' + g.querySelector('.st').textContent).join(' ')",
+            "closed:成功 open:失败 open:成功",
+        )
+        drive.check(
+            groups == "closed:成功 open:失败 open:成功",
+            f"日志区该是旧组收起、失败组与最新组展开，实测 {groups!r}",
+        )
+        drive.check_token_style(window, ".runlog-run.error", "backgroundColor", "error-bg")
+        drive.check_token_style(window, ".runlog-line.error .lv", "color", "error")
+        long_line = window.evaluate_js(
+            "(() => { const tx = [...document.querySelectorAll('.runlog-line .tx')]"
+            "   .find(e => e.textContent.includes('sample-0001'));"
+            " const list = document.querySelector('[data-runlog-list]');"
+            " if (!tx || !list) return 'missing'; const cs = getComputedStyle(tx);"
+            " if (cs.whiteSpace !== 'pre-wrap') return 'white-space ' + cs.whiteSpace;"
+            " if (tx.getBoundingClientRect().height < parseFloat(cs.lineHeight) * 1.5)"
+            "   return 'one-line';"
+            " if (list.scrollWidth > list.clientWidth) return 'hscroll';"
+            " const us = cs.userSelect || cs.webkitUserSelect;"
+            " return us === 'none' ? 'locked' : 'wraps'; })()"
+        )
+        drive.check(long_line == "wraps", f"日志长行该换行、可选，实测 {long_line!r}")
+        # 折叠后 Python 再记一条 error：日志区自动展开，偏好仍记着「折叠」。
+        folded = window.evaluate_js(
+            "(() => { const b = document.querySelector('[data-runlog-toggle]');"
+            " if (!b) return 'missing'; b.click();"
+            " return document.querySelector('[data-runlog-list]').hidden ? 'folded' : 'open'; })()"
+        )
+        drive.check(folded == "folded", f"点折叠后日志区该收起，实测 {folded!r}")
+        runlog.error("折叠着来了一条失败")
+        unfolded = drive.wait_js(
+            window,
+            "(() => { const list = document.querySelector('[data-runlog-list]');"
+            " if (!list) return 'missing'; let saved;"
+            " try { saved = localStorage.getItem('runlog-collapsed'); } catch (e) { saved = '?'; }"
+            " return (list.hidden ? 'folded' : 'open') + ' ' + JSON.stringify(saved); })()",
+            'open "1"',
+        )
+        drive.check(unfolded == 'open "1"', f"来了 error 该自动展开且不写回偏好，实测 {unfolded!r}")
         # 主题按钮：点一次翻到深色（图标换成太阳、localStorage 存 ''、提示改成
         # 「切换到浅色」），再点一次翻回浅色。
         flips = window.evaluate_js(
@@ -449,11 +522,13 @@ def make_smoke_script(serve_dir: Path):
 
 def main() -> None:
     serve_dir = copy_assets(page_dir())  # 每次启动覆盖落样式，页面永远跟着装的这版 msui 走
+    runlog = RunLog()  # 要按天落文件就给 log_dir=（比如 storage_dir 下的「日志」）
+    demo_log(runlog)
     smoke = os.environ.get("APP_SMOKE") == "1"
-    driver = SmokeDriver(make_smoke_script(serve_dir)) if smoke else None
+    driver = SmokeDriver(make_smoke_script(serve_dir, runlog)) if smoke else None
     run(
         serve_dir / "index.html",
-        js_api=Api(),
+        js_api=Api(runlog),
         title="示例小程序",
         single_instance="msui-example-minimal",  # 连点图标只开一扇窗
         hidden=driver is not None,
@@ -470,9 +545,9 @@ if __name__ == "__main__":
 要点：
 
 - `copy_assets` **无条件覆盖**地把 `tokens.css` + `base.css` + `tokens-light.css`
-  + `theme.js` 落进页面目录并返回该开窗的目录——开窗一律用返回值，别写死
-  `page_dir`；`tokens-light.css`（浅色主题）与 `theme.js`（深浅切换）都是可选的
-  （§4），页面不引用它们就不起任何作用；
+  + `theme.js` + `runlog.js` 落进页面目录并返回该开窗的目录——开窗一律用返回值，
+  别写死 `page_dir`；`tokens-light.css`（浅色主题）、`theme.js`（深浅切换，§4）与
+  `runlog.js`（运行日志区，§3）都是可选的，页面不引用它们就不起任何作用；
 - 这几份副本不入仓、不手改（`pages/.gitignore` 把它们排除掉）；
 - 钉版本的官方姿势就是上面的 `MSUI_PINNED` 常量 + 横幅断言：**钉死常量证明
   「产物带的确实是钉的这一版」，改读 `importlib.metadata` 只是回显装了哪版、
@@ -887,7 +962,9 @@ if __name__ == "__main__":
   - 状态栏 <footer class="status">：版本 / 数据目录 / 当前状态一条细栏。
   左栏是一串步骤卡 .step（.done 已完成 / .cur 当前 / .wait 等待，卡里放说明
   .meta、参数 .param、动作 .act、进度条），上面一行小标题 .eyebrow；主区一排读数卡
-  .kpis / .kpi（空态写破折号、警示态 .warn），数据网格里放整句话的列挂 td.wrap。
+  .kpis / .kpi（空态写破折号、警示态 .warn），数据网格里放整句话的列挂 td.wrap；
+  主区底部是运行日志区 section.runlog[data-runlog]（配 </body> 前的 runlog.js 与
+  Python 侧 js_api 的 get_log：按一次运行分组、两层折叠）。
   进场动效给块挂 .fade-in，要错峰就在元素上写 style="--i: 序号"；系统开了
   「减少动态效果」时自动静止。用不上的整块删掉即可。
 -->
@@ -979,6 +1056,10 @@ if __name__ == "__main__":
           </table>
         </div>
       </div>
+      <section class="runlog" data-runlog="get_log" aria-label="运行日志">
+        <div class="eyebrow"><span class="t">运行日志</span><span class="n" data-runlog-count></span><span class="grow"></span><button type="button" data-runlog-clear>清空显示</button><button type="button" data-runlog-toggle aria-expanded="true">折叠</button></div>
+        <div class="runlog-list" data-runlog-list></div>
+      </section>
     </main>
   </div>
   <footer class="status">
@@ -987,6 +1068,7 @@ if __name__ == "__main__":
     <span class="grow"></span>
     <span>就绪</span>
   </footer>
+  <script src="runlog.js"></script>
   <script>
     // 分段选择：当前项挂 .on，aria-pressed 跟着写对。
     const views = document.getElementById("views");
@@ -1285,6 +1367,97 @@ const col = (name) => { const i = heads.indexOf(name); if (i < 0) throw new Erro
 const qty = row.cells[col("数量")].textContent;
 ```
 
+### 运行日志区：按一次运行分组、两层折叠
+
+app-layout.html 主区底部那块是**运行日志区**：标题行写着行数，有「清空显示」和
+「折叠」；下面按「一次运行」分组，每组一行结论「时间 · 状态 · 名称 · 结果」，点开看
+原话；每行原话是「时间 · 等级 · 正文」，时间等宽灰字，等级「信息 / 告警 / 失败」用
+语义色，失败行浅红底，长行自动换行。数据在 Python 侧的 `msui.runlog.RunLog`，长相在
+base.css，行为在 msui 落下来的 `runlog.js`——**页面不写轮询和折叠逻辑**。三步：
+
+1. **Python：建一个 `RunLog`，业务里记行、分组**（后台线程里记也行，它线程安全）：
+
+   ```python
+   # examples/minimal/app.py 片段
+       runlog = RunLog()  # 要按天落文件就给 log_dir=（比如 storage_dir 下的「日志」）
+   ```
+
+   ```python
+   # examples/minimal/app.py 片段
+       runlog.start_run("读取数据")
+       runlog.info("读到 6 张表。")
+       runlog.end_run("ok", "6 张表全部识别成功")
+   ```
+
+   - 记一条：`runlog.info(…)` / `runlog.warn(…)` / `runlog.error(…)`，或
+     `runlog.log("info" | "warn" | "error", 正文)`；等级就这三档，页面按这个字段上色，
+     **不认正文里的字样**；
+   - 一次运行：`start_run(名称)` 开始，`end_run(结局, 一句结果)` 结束，结局是
+     `"ok"` / `"error"` / `"stopped"`。**那句结果就是页面组头上的结论**，页面不从原话
+     里截，所以写成给业务用户看的一句话。期间记的行自动挂进这一组，运行之外的是散行；
+     上一次没结束（比如中途抛了异常）就开始下一次，上一次记成 `stopped`；
+   - 已经在用标准 `logging` 的程序不用改每处记日志的代码：
+     `logging.getLogger().addHandler(RunLogHandler(runlog))`（`RunLogHandler`、
+     `read_log_file` 与 `RunLog` 都从 `msui.runlog` 导入），WARNING → 告警，
+     ERROR 及以上 → 失败，其余 → 信息；
+   - 内存里最多留 `max_lines`（默认 5000）行，超了丢最旧的；
+   - 给了 `log_dir=` 就按天落文件 `<log_dir>/<YYYY-MM-DD>.log`：一条一行页眉
+     `2026-01-31 09:12:05 [失败] 导出`，原话每行缩进四格，人能直接读，
+     `read_log_file(路径)` 能读回；`runlog.log_file_path()` 是今天那份。写不进（权限、
+     路径不对）不抛，日志区里出一条告警「日志文件写不进：…」，只提示一次。
+
+2. **js_api 上放一个取日志的方法**，把 `since()` 原样转给页面（不包 `Serializer`：
+   取日志不该被正在跑的业务动作挡成「忙」）：
+
+   ```python
+   # examples/minimal/app.py 片段
+       def get_log(self, since: int = 0) -> dict:
+           """日志区每半秒调一次：since 之后的新行与运行变化。不包 Serializer——
+           RunLog 自己线程安全，取日志不该被正在跑的业务动作挡成「忙」。"""
+           return self._runlog.since(since)
+   ```
+
+   `since(序号)` 返回 `{"lines": [{"seq", "time", "level", "text", "run"}…],
+   "runs": [{"id", "name", "start", "status", "result"}…], "last": 最新序号}`：
+   上次之后的新行、有变化的运行（`status` 多一个 `"running"`）和下次要带回来的序号。
+
+3. **页面：放一段标准标记，`</body>` 前引用 `runlog.js`**：
+
+   ```html
+   <!-- examples/minimal/pages/app-layout.html 片段 -->
+   <section class="runlog" data-runlog="get_log" aria-label="运行日志">
+     <div class="eyebrow"><span class="t">运行日志</span><span class="n" data-runlog-count></span><span class="grow"></span><button type="button" data-runlog-clear>清空显示</button><button type="button" data-runlog-toggle aria-expanded="true">折叠</button></div>
+     <div class="runlog-list" data-runlog-list></div>
+   </section>
+   ```
+
+   ```html
+   <!-- examples/minimal/pages/app-layout.html 片段 -->
+   <script src="runlog.js"></script>
+   ```
+
+   `data-runlog` 的值是第 2 步那个方法名（空着就是 `get_log`）。要「打开日志文件夹」
+   就在「折叠」前面加一颗 `<button type="button" data-runlog-folder="open_log_folder">打开日志文件夹</button>`，
+   值是 js_api 上打开文件夹的方法名（自己写，比如 Windows 上
+   `os.startfile(runlog.log_dir)`）。
+
+`runlog.js` 管的事：
+
+- 每半秒调一次那个方法、只取新的；应答包在 `Serializer` 信封里也认，忙就等下一轮；
+- **整区折叠**：点「折叠」只剩标题行和行数，状态存 localStorage 的 **`runlog-collapsed`**
+  键（`'1'` 折叠；没存过 = 展开）。**折叠着新到了告警 / 失败行、或有运行以失败结束，
+  自动展开，这次展开不记**——下次打开照样折叠；开窗时取回的历史不算「新到」。下次
+  打开还记得的前提同主题按钮：`run()` 给了 `storage_dir=`；
+- **分组**：失败组浅红底、默认展开；最新一组默认展开，更早的收起；还在跑的组状态写
+  「运行中」，跑完自动换成结论。用户亲手点开或收起的组以用户为准，新数据不改它；
+- 停在底部才跟着滚到最新，往上翻着看时不把人拽下去；
+- 页面上最多留 2000 行，超了删最早的（行删空的组整组删），行数写成「N 行，显示最近
+  2000 行」；
+- 「清空显示」只清页面上的显示和行数，不动 Python 里的缓冲、不删日志文件；
+- 原话可以选中复制（`run()` 默认文字可选）。
+
+旧的 `<pre class="log">` 原样保留（不换行、不折叠），没换新部件的页面一个像素不变。
+
 ## 4. override.css（默认不用）
 
 默认零配置、不建这个文件。真要换色（比如另一套品牌色）时：
@@ -1444,8 +1617,8 @@ spec 对 msui **零资源配置**——样式与版本元数据由包自带的 h
 # examples/minimal/app.spec
 # -*- mode: python ; coding: utf-8 -*-
 # 最小消费者的 PyInstaller spec。关键点：对 msui 的资源与元数据**零配置**——
-# tokens.css / base.css / tokens-light.css / theme.js / dist-info 全由 msui 包
-# 自带的 pyinstaller40 hook 收齐。
+# tokens.css / base.css / tokens-light.css / theme.js / runlog.js / dist-info 全由
+# msui 包自带的 pyinstaller40 hook 收齐。
 # datas 只声明自己持有的页面目录。
 import os
 
@@ -1461,14 +1634,14 @@ a = Analysis(
     noarchive=False,
 )
 
-# 开发机上冒烟落地过的 tokens.css / base.css / tokens-light.css / theme.js 副本
+# 开发机上冒烟落地过的 tokens.css / base.css / tokens-light.css / theme.js / runlog.js 副本
 # （gitignored、但在盘上）会被 pages/ 整目录收集顺手带进产物——纯冗余：运行时
 # copy_assets 每次启动都无条件覆盖，产物里那几份副本永远不会被用到。按目的地
 # 路径剔掉；CI 的干净 checkout 本来就没有它们，此过滤不改变 CI 产物。
 def _is_landed_asset(dest: str) -> bool:
     parts = dest.replace("\\", "/").split("/")
     return parts[0] == "pages" and parts[-1] in (
-        "tokens.css", "base.css", "tokens-light.css", "theme.js",
+        "tokens.css", "base.css", "tokens-light.css", "theme.js", "runlog.js",
     )
 
 a.datas = [entry for entry in a.datas if not _is_landed_asset(entry[0])]
@@ -1526,14 +1699,15 @@ null 被直接 `getComputedStyle`）时**不中断整场**——异常文本当�
 使然，不为失败开小灶）——所以探针尽量写成 null-safe（照上面 `.display`
 那段先判元素再取样式），元素缺席时报出的是 `missing` 而不是一串异常文本。
 
-msui 落进来的四份副本（三份样式 + `theme.js`）要挡在 git 外——`pages/.gitignore`
-写这四行（仓里的唯一来源是 msui 包，副本入了仓就是漂移源）：
+msui 落进来的五份副本（三份样式 + `theme.js` + `runlog.js`）要挡在 git 外——`pages/.gitignore`
+写这五行（仓里的唯一来源是 msui 包，副本入了仓就是漂移源）：
 
 ```
 tokens.css
 base.css
 tokens-light.css
 theme.js
+runlog.js
 ```
 
 ## 版本标记：产物里读得出带的是哪版 msui
