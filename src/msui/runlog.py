@@ -243,8 +243,9 @@ def read_log_file(path: str | Path) -> list[dict]:
     entries: list[dict] = []
     # 按 \n 切、不用 splitlines：正文里的 \x0c、\x0b 这类字符不是行尾。
     # newline=""：不让读取把 \r 当行尾翻译掉（写入时已统一成 \n）。
+    # 正文里的 \r 写入时已统一成 \n，所以行尾剩下的 \r 只会是 CRLF（Windows 上手改过再存）留下的，去掉。
     with Path(path).open(encoding="utf-8", newline="") as f:
-        lines = f.read().split("\n")
+        lines = [line.removesuffix("\r") for line in f.read().split("\n")]
     if lines and lines[-1] == "":
         lines.pop()
     for line in lines:

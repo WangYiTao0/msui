@@ -345,3 +345,12 @@ def test_concurrent_writers_land_in_the_file_in_seq_order(tmp_path):
     in_memory = [line["text"] for line in log.since(0)["lines"]]
     in_file = [entry["text"] for entry in read_log_file(tmp_path / "2026-11-18.log")]
     assert in_file == in_memory
+
+
+def test_reading_a_file_saved_with_crlf_line_ends(tmp_path):
+    # Windows 上手动打开改过再存，行尾会变成 CRLF；读回结果不变。
+    path = tmp_path / "2026-11-18.log"
+    path.write_bytes("2026-11-18 09:00:00 [信息]\r\n    好的\r\n".encode("utf-8"))
+    assert read_log_file(path) == [
+        {"date": "2026-11-18", "time": "09:00:00", "level": "info", "run": "", "text": "好的"},
+    ]
