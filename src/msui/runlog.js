@@ -9,7 +9,7 @@
  *            <button data-runlog-clear>清空显示</button>
  *            <button data-runlog-folder="open_log_folder">打开日志文件夹</button>（可选）
  *            <button data-runlog-toggle aria-expanded="true">折叠</button></div>
- *          <div class="runlog-body" data-runlog-list></div>
+ *          <div class="runlog-list" data-runlog-list></div>
  *        </section>
  *   2. 在 </body> 前引用：<script src="runlog.js"></script>。
  *

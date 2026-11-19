@@ -5,7 +5,7 @@
  * 覆盖：排版、按钮、操作行、输入框、表单行、进度条、表格、卡片、模态对话框、
  * 提示条、日志区、空态、分段选择、徽章、进场动效、列表页 / 设置页部件（数据
  * 网格、工具条、筛选片、搜索框、图标按钮、开关、状态点）、左栏步骤卡、读数卡、
- * 区块小标题、整句列、深浅切换按钮；外加 opt-in 的应用式版式
+ * 区块小标题、整句列、深浅切换按钮、运行日志区；外加 opt-in 的应用式版式
  * （`<body class="app">`：顶栏 / 多栏 / 状态栏，不挂开关的小工具窗一个像素不变）。
  * 两条原则：
  *   1. 语义化标签（button / input / table…）直接给默认样式，裸 HTML 就长对；
@@ -704,6 +704,64 @@ button.switch[aria-checked="true"]::after {
 .kpi .sub span + span::before { content: "·"; margin: 0 6px; color: var(--muted); }
 .kpi .sub .dim { color: var(--muted); }
 .kpi.warn .val { color: var(--warn); }
+
+/* ======== 运行日志区 .runlog（票 #29） ========
+   以包装排产的日志窗口（一次运行一组、失败浅红底、原话换行）和 PQPR 的底部运行
+   日志（整区折叠、来了告警自动展开、停在底部才跟随）为模版。行为归同包落地的
+   runlog.js，数据归 msui.runlog.RunLog；这里只管长相。标准标记见 README §3：
+   `<section class="runlog" data-runlog>` 里一行 .eyebrow 标题（行数 .n、清空显示、
+   打开日志文件夹、折叠），下面 `.runlog-list` 是分组列表：每次运行一个
+   `.runlog-run`（组头 `.runlog-head` + 原话 `.runlog-lines`），运行之外的散行直接
+   是 `.runlog-line`。全是新类名；旧 `.log` 一条不改（它照旧不换行）。
+   - 整区折叠收 `.runlog-list`、组折叠收 `.runlog-lines`，都靠 hidden，所以这两样
+     **本体一个 display 都不写**；
+   - 滚动区自己铺 --win 底：摆在卡片里、窗底上长相一样，字的对比度只看 win；
+   - 失败行、失败组铺 --error-bg 晕染（与 .notice.error 同一档），等级字用语义色；
+   - 正文 pre-wrap：原话里的换行与缩进保住，长路径任意处断开，不横滚。 */
+.runlog { display: flex; flex-direction: column; gap: var(--space-2); }
+.runlog > * + * { margin-top: 0; }
+.runlog .eyebrow button { font-size: 12px; padding: 2px 10px; }
+.runlog-list {
+  max-height: 40vh; overflow: auto;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--win);
+  font-size: 12px; line-height: 1.55;
+}
+.runlog-list > * + .runlog-run, .runlog-list > .runlog-run + * { border-top: 1px solid var(--border); }
+.runlog-run.error { background: var(--error-bg); }
+/* 组头一行结论：时间 · 状态 · 名称 · 结果。整行可点开合（runlog.js 给了
+   role="button" tabindex="0"），焦点环与步骤卡同一档、画在里侧不被滚动区裁掉。 */
+.runlog-head {
+  display: grid; grid-template-columns: 5.5em 3.5em minmax(4em, max-content) minmax(0, 1fr);
+  gap: var(--space-2); align-items: baseline;
+  padding: 6px var(--space-3); cursor: pointer;
+}
+.runlog-head:hover { background: var(--wash); }
+.runlog-head:focus-visible { outline: 2px solid var(--info); outline-offset: -2px; }
+.runlog-head .tm, .runlog-line .tm {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted);
+}
+.runlog-head .st { font-weight: 600; color: var(--muted); }
+.runlog-head .st.running { color: var(--info); }
+.runlog-head .st.ok { color: var(--ok); }
+.runlog-head .st.error { color: var(--error); }
+.runlog-head .nm { font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
+.runlog-head .rs { color: var(--text-dim); overflow-wrap: anywhere; }
+.runlog-run.error .rs { color: var(--error); }
+/* 收起的组：结果只占一行，展开看全句。 */
+.runlog-run:not(.open) > .runlog-head .rs { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.runlog-lines { padding-bottom: var(--space-1); }
+/* 一行原话：时间 · 等级 · 正文。等级字「信息」走 info、「告警」warn、「失败」error。 */
+.runlog-line {
+  display: grid; grid-template-columns: 5.5em 2.5em minmax(0, 1fr);
+  gap: var(--space-2); align-items: baseline;
+  padding: 2px var(--space-3);
+}
+.runlog-line .lv { color: var(--info); }
+.runlog-line.warn .lv { color: var(--warn); }
+.runlog-line.error { background: var(--error-bg); }
+.runlog-line.error .lv { color: var(--error); }
+.runlog-line .tx { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ---- 应用式版式（opt-in）：<body class="app"> 开启，整窗即容器 ----
    上面那套「body 就是容器」是给 560×520 小工具窗的：内容列停在

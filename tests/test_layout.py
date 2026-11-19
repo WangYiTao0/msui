@@ -873,6 +873,9 @@ def test_app_focus_ring_is_visible_and_token_coloured():
 # 状态点 .dot 的四个状态，名字与 .pill / .notice 同一套。
 DOT_STATES = ("ok", "warn", "info", "error")
 
+# 运行日志区组头的状态字：运行中 info、成功 ok、失败 error（已停止用裸 .st 的 muted）。
+RUNLOG_STATUS_COLOURS = (("running", "info"), ("ok", "ok"), ("error", "error"))
+
 WIDGET_PAIRS = (
     (".seg", "border", "card"),
     (".seg", "border", "win"),
@@ -964,6 +967,23 @@ WIDGET_PAIRS = (
     (".kpi .sub span + span::before", "muted", "card"),
     (".kpi .sub .dim", "muted", "card"),
     (".kpi.warn .val", "warn", "card"),
+    # ---- 票 #29：运行日志区 ----
+    # 日志区的滚动区自己铺 --win 底（摆在卡片里、窗底上都一样），所以里面的字只对
+    # win 登记；外框那圈 --border 外侧挨着的可能是卡片也可能是窗底，两边都登记。
+    # 失败行 / 失败组的 --error-bg 是半透明晕染，透出来的还是 win（同 .notice 惯例）。
+    (".runlog-list", "border", "win"),
+    (".runlog-list", "border", "card"),
+    (".runlog-head .tm, .runlog-line .tm", "muted", "win"),
+    (".runlog-head .st", "muted", "win"),
+    *((f".runlog-head .st.{s}", t, "win") for s, t in RUNLOG_STATUS_COLOURS),
+    (".runlog-head .nm", "text", "win"),
+    (".runlog-head .rs", "text-dim", "win"),
+    (".runlog-run.error .rs", "error", "win"),
+    (".runlog-head:focus-visible", "info", "win"),
+    (".runlog-line .lv", "info", "win"),
+    (".runlog-line.warn .lv", "warn", "win"),
+    (".runlog-line.error .lv", "error", "win"),
+    (".runlog-line .tx", "text", "win"),
 )
 
 COLOUR_PROPS_RE = re.compile(
@@ -1458,3 +1478,83 @@ def test_base_never_forces_body_text_selectable():
 def test_step_head_lines_up_the_number_and_the_title():
     head = rule(".step .head")
     assert "display: flex" in head and "align-items: center" in head
+
+
+# ---------------------------------------------------------------------------
+# 票 #29：运行日志区 .runlog——标题行 + 分组列表，两层折叠，行格式「时间 · 等级 ·
+# 正文」。模版是包装排产的日志窗口与 PQPR 的底部运行日志。旧 .log 一条不改
+# （上面「不换行」那条继续钉着）。
+# ---------------------------------------------------------------------------
+
+
+def test_runlog_list_is_a_bounded_scroller_on_the_window_colour():
+    body = rule(".runlog-list")
+    assert re.search(r"max-height: \d+vh", body), "定最高，不跟着日志一路长"
+    assert "overflow: auto" in body
+    assert "background: var(--win)" in body
+    assert "border: 1px solid var(--border)" in body
+
+
+def test_runlog_area_lays_out_its_title_row_and_list_with_a_token_gap():
+    area = rule(".runlog")
+    assert "flex-direction: column" in area
+    assert re.search(r"gap: var\(--space-\d\)", area)
+    # 卡片里放日志区时，卡片的竖向节奏不该再给列表加一截上边距
+    assert "margin-top: 0" in rule(".runlog > * + *")
+
+
+def test_runlog_text_wraps_long_lines_instead_of_scrolling_sideways():
+    """日志区的正文要换行（与旧 .log 相反）：pre-wrap 保住原话里的换行与缩进，
+    长路径在任意处断开。"""
+    text = rule(".runlog-line .tx")
+    assert re.search(r"white-space: pre-wrap\s*;", text)
+    assert "overflow-wrap: anywhere" in text
+
+
+def test_runlog_line_is_time_level_text_in_three_columns():
+    line = rule(".runlog-line")
+    assert "display: grid" in line
+    assert re.search(r"grid-template-columns: [^;]*minmax\(0, 1fr\)", line), (
+        "正文列吃剩余宽度且允许收缩到 0，长行才会换行而不是撑破"
+    )
+    times = rule(".runlog-head .tm, .runlog-line .tm")
+    assert "font-family: var(--font-mono)" in times, "时间等宽，竖着对得齐"
+    assert "color: var(--muted)" in times
+
+
+@pytest.mark.parametrize(("level", "token"), [("warn", "warn"), ("error", "error")])
+def test_runlog_level_label_uses_the_semantic_colour(level: str, token: str):
+    assert f"color: var(--{token})" in rule(f".runlog-line.{level} .lv")
+
+
+def test_runlog_failed_line_and_failed_run_get_the_error_tint():
+    assert "background: var(--error-bg)" in rule(".runlog-line.error")
+    assert "background: var(--error-bg)" in rule(".runlog-run.error")
+
+
+def test_runlog_group_head_is_a_clickable_four_column_row():
+    """组头一行结论：时间 · 状态 · 名称 · 结果。整行可点（开合），键盘可达。"""
+    head = rule(".runlog-head")
+    assert "display: grid" in head
+    assert len(re.search(r"grid-template-columns: ([^;]+);", head).group(1).split()) >= 4
+    assert "cursor: pointer" in head
+    assert "background: var(--wash)" in rule(".runlog-head:hover")
+    assert "outline: 2px solid var(--info)" in rule(".runlog-head:focus-visible")
+
+
+def test_runlog_folded_group_keeps_its_result_to_one_line():
+    folded = rule(".runlog-run:not(.open) > .runlog-head .rs")
+    assert "white-space: nowrap" in folded
+    assert "text-overflow: ellipsis" in folded
+
+
+@pytest.mark.parametrize("cls", [".runlog-list", ".runlog-lines"])
+def test_runlog_parts_folded_by_hidden_never_declare_display(cls: str):
+    """整区折叠收的是 .runlog-list、组折叠收的是 .runlog-lines，都靠 hidden——
+    作者层写了 display 就收不起来（同 .notice / .dot）。"""
+    assert not host_rules_declaring_display(cls)
+
+
+def test_old_log_rule_is_untouched_by_the_runlog_widget():
+    """旧 .log 不改：新部件全是 runlog- 前缀的新类名，没有一条落在 .log 上。"""
+    assert not [s for s in all_selectors() if "runlog" in s and re.search(r"\.log(?![\w-])", s)]
