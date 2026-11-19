@@ -10,8 +10,9 @@
    version——发新版忘了改 README 当场红，也不许残留旧版本的下载 URL；
 4. 示例 app.py 的 MSUI_PINNED（钉版本官方姿势的示范常量）== pyproject 的
    version——示例演的就是「钉住当前版」，发新版忘了跟着改当场红；
-5. 片段块（`<!-- examples/... 片段 -->`，票 #27）：正文是那个文件里连续的几行
-   （逐行去缩进比对），新部件的每段写法都必须挂这个标记。
+5. 片段块（`<!-- examples/... 片段 -->`，票 #27；Python 写 `# examples/... 片段`，
+   票 #29）：正文是那个文件里连续的几行（逐行去缩进比对），新部件的每段写法都
+   必须挂这个标记。
 """
 from __future__ import annotations
 
@@ -32,8 +33,9 @@ _BLOCK_RE = re.compile(
 # 片段块（票 #27）：第一行 `<!-- examples/... 片段 -->`，正文是那个文件里**连续的
 # 一段**——逐行去掉行首缩进后比对（README 里的片段从第 0 列写起，文件里嵌在
 # 缩进里；README 列表项里的块整体缩进也一样）。部件写法从完整示例里摘一段讲，摘出来的必须还是示例里那几行。
+# Python 片段（票 #29）第一行写 `# examples/... 片段`。
 _FRAGMENT_RE = re.compile(
-    r"```[a-z]*\n[ \t]*<!-- (examples/[^\s]+) 片段 -->\n(.*?)```",
+    r"```[a-z]*\n[ \t]*(?:<!-- (examples/[^\s]+) 片段 -->|# (examples/[^\s]+) 片段)\n(.*?)```",
     re.DOTALL,
 )
 
@@ -67,7 +69,7 @@ def test_readme_blocks_match_example_files_verbatim():
 
 
 def _fragments() -> list[tuple[str, str]]:
-    return [(m.group(1), m.group(2)) for m in _FRAGMENT_RE.finditer(README)]
+    return [(m.group(1) or m.group(2), m.group(3)) for m in _FRAGMENT_RE.finditer(README)]
 
 
 def _stripped_lines(text: str) -> list[str]:
@@ -98,6 +100,12 @@ EXPECTED_FRAGMENT_MARKERS = (
     'class="wrap"',
     "data-theme-toggle",
     'src="theme.js"',
+    # 票 #29 运行日志区：页面标记、脚本引用、Python 侧建缓冲 / 记行 / 取日志
+    'data-runlog="get_log"',
+    'src="runlog.js"',
+    "RunLog(",
+    "start_run(",
+    "def get_log",
 )
 
 

@@ -14,7 +14,9 @@
   - 状态栏 <footer class="status">：版本 / 数据目录 / 当前状态一条细栏。
   左栏是一串步骤卡 .step（.done 已完成 / .cur 当前 / .wait 等待，卡里放说明
   .meta、参数 .param、动作 .act、进度条），上面一行小标题 .eyebrow；主区一排读数卡
-  .kpis / .kpi（空态写破折号、警示态 .warn），数据网格里放整句话的列挂 td.wrap。
+  .kpis / .kpi（空态写破折号、警示态 .warn），数据网格里放整句话的列挂 td.wrap；
+  主区底部是运行日志区 section.runlog[data-runlog]（配 </body> 前的 runlog.js 与
+  Python 侧 js_api 的 get_log：按一次运行分组、两层折叠）。
   进场动效给块挂 .fade-in，要错峰就在元素上写 style="--i: 序号"；系统开了
   「减少动态效果」时自动静止。用不上的整块删掉即可。
 -->
@@ -106,6 +108,10 @@
           </table>
         </div>
       </div>
+      <section class="runlog" data-runlog="get_log" aria-label="运行日志">
+        <div class="eyebrow"><span class="t">运行日志</span><span class="n" data-runlog-count></span><span class="grow"></span><button type="button" data-runlog-clear>清空显示</button><button type="button" data-runlog-toggle aria-expanded="true">折叠</button></div>
+        <div class="runlog-list" data-runlog-list></div>
+      </section>
     </main>
   </div>
   <footer class="status">
@@ -114,6 +120,7 @@
     <span class="grow"></span>
     <span>就绪</span>
   </footer>
+  <script src="runlog.js"></script>
   <script>
     // 分段选择：当前项挂 .on，aria-pressed 跟着写对。
     const views = document.getElementById("views");

@@ -3,6 +3,8 @@
 三步：定位页面目录 → copy_assets 落共享样式 → run 开窗。
 页面要调 Python 时把 js_api 对象递给 run（方法包 Serializer：连点丢弃、
 不排队），页面那半边的写法见 pages/index.html 尾部的 <script>。
+运行日志：建一个 RunLog，业务里 info / warn / error 记行、start_run / end_run
+分组；js_api 上放一个 get_log 把 since() 原样转给页面的日志区（app-layout.html）。
 `single_instance` 必填——只开一扇窗是默认模式，值用小程序自己的 id（全局
 唯一）：用户连点图标时第二个进程把已开的窗带到前台、自己静默退出。真要
 多开得显式写 `single_instance=False`，漏传当场 TypeError。
@@ -19,6 +21,7 @@ from pathlib import Path
 
 from msui.bridge import Serializer
 from msui.resources import copy_assets
+from msui.runlog import RunLog
 from msui.shell import run
 from msui.testing import SmokeDriver
 
@@ -36,12 +39,37 @@ class Api:
     {"busy": True, ...}，绝不排队——连点五下不会攒成一队。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, runlog: RunLog) -> None:
         self._serial = Serializer()
+        self._runlog = runlog
 
     def ping(self) -> dict:
         """页面调一次拿一句应答：{"busy": False, "data": "pong 来自 Python"}。"""
         return self._serial.run(lambda: "pong 来自 Python")
+
+    def get_log(self, since: int = 0) -> dict:
+        """日志区每半秒调一次：since 之后的新行与运行变化。不包 Serializer——
+        RunLog 自己线程安全，取日志不该被正在跑的业务动作挡成「忙」。"""
+        return self._runlog.since(since)
+
+
+def demo_log(runlog: RunLog) -> None:
+    """示例先记几条，打开 app-layout.html 就看得到日志区的样子；自己的程序在
+    真的业务动作里记（后台线程里记也行）。"""
+    runlog.info("程序已启动")
+    runlog.start_run("读取数据")
+    runlog.info("读到 6 张表。")
+    runlog.end_run("ok", "6 张表全部识别成功")
+    runlog.start_run("导出")
+    runlog.warn("数量与上一轮相差超过一成。")
+    runlog.error(
+        "目标文件被占用，写不进去："
+        "D:/数据/2024/01/导出结果_最终版_请勿改名_条目一与条目二合并_sample-0001_20240131.xlsx"
+    )
+    runlog.end_run("error", "导出失败：目标文件被占用")
+    runlog.start_run("重新读取")
+    runlog.info("读到 6 张表。")
+    runlog.end_run("ok", "完成")
 
 
 def page_dir() -> Path:
@@ -51,7 +79,7 @@ def page_dir() -> Path:
     return Path(__file__).resolve().parent / "pages"
 
 
-def make_smoke_script(serve_dir: Path):
+def make_smoke_script(serve_dir: Path, runlog: RunLog):
     """造冒烟脚本（跑在 pywebview 后台线程）：桥往返、样式生效、版式地基、
     操作行/表单行/进度条/提示条/日志区/模态对话框的实测长相、横幅钉版。
 
@@ -381,6 +409,51 @@ def make_smoke_script(serve_dir: Path):
             " return td ? getComputedStyle(td).whiteSpace : 'missing'; })()"
         )
         drive.check(wrap == "normal", f"整句列 td.wrap 该允许换行，实测 {wrap!r}")
+        # 运行日志区：三组到齐后，最早的成功组收起、失败组展开、最新组展开；
+        # 失败组铺 --error-bg；长行真的换行、不横滚；正文选得中。
+        groups = drive.wait_js(
+            window,
+            "[...document.querySelectorAll('.runlog-run')].map(g =>"
+            " (g.querySelector('.runlog-lines').hidden ? 'closed' : 'open')"
+            " + ':' + g.querySelector('.st').textContent).join(' ')",
+            "closed:成功 open:失败 open:成功",
+        )
+        drive.check(
+            groups == "closed:成功 open:失败 open:成功",
+            f"日志区该是旧组收起、失败组与最新组展开，实测 {groups!r}",
+        )
+        drive.check_token_style(window, ".runlog-run.error", "backgroundColor", "error-bg")
+        drive.check_token_style(window, ".runlog-line.error .lv", "color", "error")
+        long_line = window.evaluate_js(
+            "(() => { const tx = [...document.querySelectorAll('.runlog-line .tx')]"
+            "   .find(e => e.textContent.includes('sample-0001'));"
+            " const list = document.querySelector('[data-runlog-list]');"
+            " if (!tx || !list) return 'missing'; const cs = getComputedStyle(tx);"
+            " if (cs.whiteSpace !== 'pre-wrap') return 'white-space ' + cs.whiteSpace;"
+            " if (tx.getBoundingClientRect().height < parseFloat(cs.lineHeight) * 1.5)"
+            "   return 'one-line';"
+            " if (list.scrollWidth > list.clientWidth) return 'hscroll';"
+            " const us = cs.userSelect || cs.webkitUserSelect;"
+            " return us === 'none' ? 'locked' : 'wraps'; })()"
+        )
+        drive.check(long_line == "wraps", f"日志长行该换行、可选，实测 {long_line!r}")
+        # 折叠后 Python 再记一条 error：日志区自动展开，偏好仍记着「折叠」。
+        folded = window.evaluate_js(
+            "(() => { const b = document.querySelector('[data-runlog-toggle]');"
+            " if (!b) return 'missing'; b.click();"
+            " return document.querySelector('[data-runlog-list]').hidden ? 'folded' : 'open'; })()"
+        )
+        drive.check(folded == "folded", f"点折叠后日志区该收起，实测 {folded!r}")
+        runlog.error("折叠着来了一条失败")
+        unfolded = drive.wait_js(
+            window,
+            "(() => { const list = document.querySelector('[data-runlog-list]');"
+            " if (!list) return 'missing'; let saved;"
+            " try { saved = localStorage.getItem('runlog-collapsed'); } catch (e) { saved = '?'; }"
+            " return (list.hidden ? 'folded' : 'open') + ' ' + JSON.stringify(saved); })()",
+            'open "1"',
+        )
+        drive.check(unfolded == 'open "1"', f"来了 error 该自动展开且不写回偏好，实测 {unfolded!r}")
         # 主题按钮：点一次翻到深色（图标换成太阳、localStorage 存 ''、提示改成
         # 「切换到浅色」），再点一次翻回浅色。
         flips = window.evaluate_js(
@@ -413,11 +486,13 @@ def make_smoke_script(serve_dir: Path):
 
 def main() -> None:
     serve_dir = copy_assets(page_dir())  # 每次启动覆盖落样式，页面永远跟着装的这版 msui 走
+    runlog = RunLog()  # 要按天落文件就给 log_dir=（比如 storage_dir 下的「日志」）
+    demo_log(runlog)
     smoke = os.environ.get("APP_SMOKE") == "1"
-    driver = SmokeDriver(make_smoke_script(serve_dir)) if smoke else None
+    driver = SmokeDriver(make_smoke_script(serve_dir, runlog)) if smoke else None
     run(
         serve_dir / "index.html",
-        js_api=Api(),
+        js_api=Api(runlog),
         title="示例小程序",
         single_instance="msui-example-minimal",  # 连点图标只开一扇窗
         hidden=driver is not None,
