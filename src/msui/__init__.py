@@ -15,7 +15,8 @@
   - :mod:`msui.docgen` —— 说明文档生成器（md → 统一侧栏 html，生成前核查例子、姓名、
     链接和锚点；命令 ``msui-docs``，要装可选组 ``docs``）与 ``open_doc``（系统浏览器
     打开文档并跳到锚点，运行时可用）；
-  - :mod:`msui.testing` —— 样式闸门函数库（对比度校验、防游离色值扫描）。
+  - :mod:`msui.testing` —— 样式闸门函数库（对比度校验、防游离色值扫描）与图标检查
+    （``icon_problems``：ico 四档、spec 挂 icon、toml 的 icon 指向 256×256 PNG）。
 
 包自带 PyInstaller hook：下游 spec 对 msui 的资源与元数据零配置。
 """

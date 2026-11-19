@@ -1,0 +1,9 @@
+# 宿主平台的接入文件（字段含义见宿主平台接入契约 §3）。本示例只为演示图标这一项，
+# 其余字段照契约写成最小可用的样子。
+id = "msui-minimal"
+name = "msui 最小示例"
+category = "gui"
+entry = "app.exe"
+
+# 工具列表里显示的图标：仓内 256×256 透明 PNG，≤ 64 KB，由 assets/make_icon.py 生成。
+icon = "assets/icon.png"
