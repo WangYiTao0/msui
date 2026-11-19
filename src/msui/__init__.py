@@ -10,6 +10,8 @@
   - :mod:`msui.single_instance` —— 单实例守卫（``run(single_instance=id)``
     内部已接：连点图标只开一扇窗）；
   - :mod:`msui.bridge` —— js_api 桥的通用件（串行化、忙碌应答、前端日志）；
+  - :mod:`msui.runlog` —— 运行日志缓冲（按「一次运行」分组、增量读取、按天落
+    文件、logging.Handler），页面侧配同包落地的 runlog.js；
   - :mod:`msui.testing` —— 样式闸门函数库（对比度校验、防游离色值扫描）。
 
 包自带 PyInstaller hook：下游 spec 对 msui 的资源与元数据零配置。
