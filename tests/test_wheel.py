@@ -51,6 +51,9 @@ def test_wheel_contains_msui_package(tmp_path):
     # 第一份 JS 资产（票 #27 的主题切换）：同样靠「包目录里的非 .py 文件」
     # 这条实测行为进 wheel，后缀换成 .js 不该改变它——钉死。
     assert "msui/theme.js" in names, f"wheel 里没有 theme.js，实际内容：{names}"
+    # 运行日志区脚本（票 #29）与它的 Python 半边一起进 wheel。
+    assert "msui/runlog.js" in names, f"wheel 里没有 runlog.js，实际内容：{names}"
+    assert "msui/runlog.py" in names, f"wheel 里没有 runlog.py，实际内容：{names}"
 
     # PyInstaller hook 也必须进 wheel：hook-msui.py 文件名带连字符、不是可
     # import 的模块，构建后端会不会收它同样是实测行为——掉出去的话下游冻结

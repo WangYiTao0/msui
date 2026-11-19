@@ -73,6 +73,7 @@ def test_every_landed_asset_is_a_data_file_the_hook_collects():
 
     package_dir = Path(resources.__file__).resolve().parent
     assert "theme.js" in resources.ASSET_NAMES
+    assert "runlog.js" in resources.ASSET_NAMES  # 票 #29
     for name in resources.ASSET_NAMES:
         assert (package_dir / name).is_file(), f"包目录里没有 {name}"
         assert Path(name).suffix not in {".py", ".pyc"}, f"{name} 会被 hook 排除"

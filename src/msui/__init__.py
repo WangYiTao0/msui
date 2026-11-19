@@ -3,7 +3,7 @@
 模块一览（消费者契约与从零跑起来的步骤见仓库 README）：
 
   - :mod:`msui.webview2` —— WebView2 运行时检测与静默引导安装；
-  - :mod:`msui.resources` —— tokens / tokens-light / base 三份共享样式与 theme.js 的定位、解析与
+  - :mod:`msui.resources` —— tokens / tokens-light / base 三份共享样式与 theme.js / runlog.js 的定位、解析与
     ``copy_assets``（启动时落进页面目录，头部带版本横幅）；
   - :mod:`msui.shell` —— ``run(...)`` 一行开 pywebview 窗口；
   - :mod:`msui.chrome` —— Windows 原生标题栏按 tokens 染深（run 内部已接）；

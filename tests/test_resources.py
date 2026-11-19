@@ -65,10 +65,13 @@ def test_asset_datas_targets_bundle_dir():
     # 官方浅色主题 tokens-light.css（票 #23）、主题切换 theme.js（票 #27）也随
     # copy_assets 一起落地
     assert set(resources.ASSET_NAMES) == {
-        "tokens.css", "base.css", "tokens-light.css", "theme.js",
+        "tokens.css", "base.css", "tokens-light.css", "theme.js", "runlog.js",
     }
     assert resources.TOKENS_LIGHT_CSS_NAME == "tokens-light.css"
     assert resources.THEME_JS_NAME == "theme.js"
+    # 运行日志区的页面脚本（票 #29）：第二份 JS 资产，公开面常量钉死文件名
+    assert resources.RUNLOG_JS_NAME == "runlog.js"
+    assert "RUNLOG_JS_NAME" in resources.__all__
 
 
 # ---------------------------------------------------------------------------

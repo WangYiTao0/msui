@@ -1,7 +1,7 @@
 """PyInstaller 收集 msui 的 hook：静态资产 + 发行版元数据，一并进冻结产物。
 
 - ``collect_data_files("msui")``：包目录里的非 .py 文件（tokens.css / base.css /
-  tokens-light.css / theme.js，与 ``resources.ASSET_NAMES`` 同序）收进产物的
+  tokens-light.css / theme.js / runlog.js，与 ``resources.ASSET_NAMES`` 同序）收进产物的
   ``msui/`` 目录——与 `resources.BUNDLE_DIR` 的运行时查找路径一致。
 - ``copy_metadata("msui")``：把 dist-info 元数据也收进去。**这一条是刻意
   的**：冻结产物里 `importlib.metadata.version("msui")` 全靠它才拿得到真
