@@ -328,3 +328,61 @@ def test_without_markdown_it_the_command_says_how_to_install(tmp_path, capsys, m
     assert code == 2
     assert 'pip install "msui[docs]"' in text
     assert not (tmp_path / "html").exists()
+
+
+def test_h3_that_only_starts_with_the_character_li_is_not_an_example(tmp_path, capsys):
+    """「例外情况」「例如」不是例子；「例：…」「例 3」才是。"""
+    bad = GOOD + "\n## 3. 去重\n\n### 例外情况\n\n空。\n\n### 例如这样\n\n空。\n"
+    _assert_blocked(capsys, tmp_path, {"README.md": bad}, "「3. 去重」这一节没有例子")
+
+
+def test_exemption_without_colon_does_not_count(tmp_path, capsys):
+    bad = GOOD + "\n## 3. 名词\n\n<!-- 无需例子 只是名词 -->\n"
+    _assert_blocked(capsys, tmp_path, {"README.md": bad}, "「3. 名词」这一节没有例子")
+
+
+def test_short_ascii_names_in_names_file_match_whole_words_only(tmp_path, capsys):
+    names = tmp_path / "名单.txt"
+    names.write_text("Li\n", encoding="utf-8")
+    ok = GOOD + "\nLine 和 List 里含 Li 两个字母不算。\n".replace(" Li ", " ")
+    src = _write(tmp_path / "docs", {"README.md": ok})
+    code, text = _run(capsys, src, tmp_path / "html", "--names", names)
+    assert code == 0, text
+    _assert_blocked(capsys, tmp_path / "b", {"README.md": GOOD + "\n由 Li 确认。\n"}, "Li",
+                    extra_args=("--names", names))
+
+
+def test_link_examples_inside_code_blocks_are_left_alone(tmp_path, capsys):
+    doc = GOOD + "\n```html\n<a href='另一篇.md'>示例</a>\n```\n\n[真链接](另一篇.md)\n"
+    other = "# 另一篇\n"
+    src = _write(tmp_path / "docs", {"README.md": doc, "另一篇.md": other})
+    out = tmp_path / "html"
+    code, text = _run(capsys, src, out)
+    assert code == 0, text
+    page = (out / "index.html").read_text(encoding="utf-8")
+    assert "&lt;a href='另一篇.md'&gt;" in page, "代码块里的示例被改写了"
+    hrefs = [docgen.unquote(h) for h in re.findall(r'href="([^"]+)"', page)]
+    assert "另一篇.html" in hrefs
+
+
+def test_sidebar_title_ignores_hash_comments_in_code_blocks(tmp_path, capsys):
+    doc = "```python\n# 这是注释\n```\n\n" + GOOD
+    src = _write(tmp_path / "docs", {"README.md": doc})
+    out = tmp_path / "html"
+    code, text = _run(capsys, src, out)
+    assert code == 0, text
+    assert "<title>示例说明</title>" in (out / "index.html").read_text(encoding="utf-8")
+
+
+def test_open_doc_on_windows_uses_a_fresh_redirect_page_each_time(tmp_path, monkeypatch):
+    monkeypatch.setattr(docgen.sys, "platform", "win32")
+    monkeypatch.setattr(docgen.tempfile, "gettempdir", lambda: str(tmp_path / "tmp"))
+    a, b = tmp_path / "a.html", tmp_path / "b.html"
+    a.write_text("a", encoding="utf-8")
+    b.write_text("b", encoding="utf-8")
+    opened: list[str] = []
+    first = docgen.open_doc(a, "x", opener=opened.append)
+    docgen.open_doc(b, "y", opener=opened.append)
+    assert opened[0] != opened[1]
+    redirect = Path(docgen.unquote(docgen.urlsplit(opened[0]).path))
+    assert first["url"] in redirect.read_text(encoding="utf-8")

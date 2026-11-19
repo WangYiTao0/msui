@@ -3,8 +3,8 @@
 用法（小程序仓根下；生成器是可选依赖组，只在生成文档时装）::
 
     pip install "msui[docs]"
-    msui-docs docs docs/html            # 生成
-    msui-docs docs docs/html --check    # 只核查，不写文件
+    msui-docs docs pages/docs            # 生成
+    msui-docs docs pages/docs --check    # 只核查，不写文件
     msui-docs --self-test               # 自证：各道核查对正负样本都判对
 
 ``msui-docs`` 与 ``python -m msui.docgen`` 等价。
@@ -20,7 +20,8 @@ msui 深浅两套 token 值、跟随系统 ``prefers-color-scheme``（文档在�
 - 姓名：``名.姓`` 形态的英文姓名、``C:\\Users\\<人名>`` 路径（宿主平台接入契约：产物不含员工
   姓名和个人路径），以及 ``--names`` 名单文件里的每个名字；
 - 本地链接指向的文件存在，带 ``#锚`` 的锚点存在；``<details>`` 成对、id 不重复；
-- 例子：每个二级节至少有一个「例」——以「例」开头的三级标题，或以 ``**例 N`` 开头的段落。
+- 例子：每个二级节至少有一个「例」——``### 例 N…`` / ``### 例：…`` 三级标题（「例外」「例如」
+  不算），或以 ``**例 N`` 开头的段落。
   确实不需要例子的节写一行 ``<!-- 无需例子：理由 -->``，理由不能空。「请你回复」「附」开头
   的节和第一个二级标题之前的文首概述自动豁免。
 - 有 d2 流程图而本机没装 d2。
@@ -48,6 +49,7 @@ from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 __all__ = [
     "EXEMPT_LABEL",
+    "MissingDependency",
     "Page",
     "build",
     "check",
@@ -62,11 +64,13 @@ PKG_DIR = Path(__file__).resolve().parent
 
 # 豁免注释：<!-- 无需例子：理由 -->（中英文冒号都认）。
 EXEMPT_LABEL = "无需例子"
-_EXEMPT_RE = re.compile(r"<!--\s*" + EXEMPT_LABEL + r"\s*[：:]?(.*?)-->", re.S)
+_EXEMPT_RE = re.compile(r"<!--\s*" + EXEMPT_LABEL + r"\s*[：:](.*?)-->", re.S)
 # 自动豁免的二级节：标题去掉前面的编号后以这些字开头。
 _AUTO_EXEMPT_PREFIXES = ("请你回复", "附")
 _NUMBER_PREFIX_RE = re.compile(r"^\s*(?:\d+(?:\.\d+)*[.、．]?|第\s*[\d一二三四五六七八九十百]+\s*[节章部分])\s*[：:、]?\s*")
 _EXAMPLE_PARA_RE = re.compile(r"^\*\*例\s*\d+")
+# 三级标题「例 3：…」「例：…」算例子；「例外情况」「例如…」不算。
+_EXAMPLE_H3_RE = re.compile(r"^例\s*(?:\d|[：:])")
 
 _INSTALL_HINT = '文档生成器要 markdown-it-py：pip install "msui[docs]"'
 _D2_HINT = "本机没装 d2，流程图出不了（装法见 https://d2lang.com ；macOS：brew install d2）"
@@ -187,11 +191,21 @@ def find_pages(src_dir: Path) -> list[Page]:
         out_name = "index.html" if is_index else path.stem + ".html"
         if is_index and any(p.out_name == "index.html" for p in pages):
             out_name = path.stem + ".html"  # README.md 与 index.md 同在时只让一个当首页
-        text = path.read_text(encoding="utf-8")
-        m = re.search(r"^#\s+(.+?)\s*#*\s*$", text, re.M)
-        page = Page(path.resolve(), out_name, m.group(1) if m else path.stem)
-        pages.insert(0, page) if out_name == "index.html" else pages.append(page)
+        page = Page(path.resolve(), out_name, _first_h1(path.read_text(encoding="utf-8")) or path.stem)
+        if out_name == "index.html":
+            pages.insert(0, page)
+        else:
+            pages.append(page)
     return pages
+
+
+def _first_h1(text: str) -> str:
+    """第一个一级标题的文字；按 markdown 解析，代码块里的 `# 注释` 不算。"""
+    tokens = _markdown().parse(text)
+    for i, tok in enumerate(tokens):
+        if tok.type == "heading_open" and tok.tag == "h1":
+            return _plain(tokens[i + 1].content)
+    return ""
 
 
 # ---------------------------------------------------------------- 核查
@@ -208,13 +222,15 @@ _CODE_PREFIXES = frozenset({
     "Web", "Path", "Enum", "System", "Microsoft", "Windows",
 })
 _USER_PATH_RE = re.compile(r"[A-Za-z]:\\+Users\\+([^\\/\s\"'<>`]+)", re.I)
-_GENERIC_USERS = frozenset({"public", "default", "all users", "<人名>", "<用户名>", "<user>", "<name>", "..."})
+# 路径里不是人名的用户目录（公共、默认、省略号写法）；带 <> 的占位写法本来就匹配不上路径正则。
+_GENERIC_USERS = frozenset({"public", "default", "..."})
 
 
 def _scan_names(text: str, names: Iterable[str], allow: Iterable[str]) -> list[tuple[int, str]]:
     allowed = set(allow)
     hits: list[tuple[int, str]] = []
-    listed = [n for n in names if n]
+    listed = [(n, re.compile(r"(?<![A-Za-z0-9])" + re.escape(n) + r"(?![A-Za-z0-9])") if n.isascii() else None)
+              for n in names if n]
     for lineno, line in enumerate(text.splitlines(), 1):
         found: set[str] = set()
         for m in _NAME_RE.finditer(line):
@@ -224,8 +240,8 @@ def _scan_names(text: str, names: Iterable[str], allow: Iterable[str]) -> list[t
         for m in _USER_PATH_RE.finditer(line):
             if m.group(1).lower() not in _GENERIC_USERS and not m.group(1).startswith("%"):
                 found.add(m.group(0))
-        for name in listed:
-            if name.lower() in line.lower():
+        for name, word_re in listed:
+            if (word_re.search(line) if word_re else name in line):
                 found.add(name)
         hits.extend((lineno, word) for word in sorted(found))
     return hits
@@ -246,7 +262,7 @@ def _check_examples(md, text: str) -> list[tuple[int, str]]:
             continue  # 文首概述
         cur = sections[-1]
         if tok.type == "heading_open" and tok.tag == "h3":
-            if _strip_number(tokens[i + 1].content).startswith("例"):
+            if _EXAMPLE_H3_RE.match(_strip_number(tokens[i + 1].content)):
                 cur["example"] = True
         elif tok.type == "paragraph_open" and i + 1 < len(tokens):
             if _EXAMPLE_PARA_RE.match(tokens[i + 1].content.lstrip()):
@@ -335,7 +351,10 @@ def _token_css() -> str:
 
     dark = parse_tokens((PKG_DIR / "tokens.css").read_text(encoding="utf-8"))
     light = parse_tokens((PKG_DIR / "tokens-light.css").read_text(encoding="utf-8"))
-    decl = lambda d: "".join(f"--{k}: {v};" for k, v in d.items())  # noqa: E731
+
+    def decl(tokens: dict[str, str]) -> str:
+        return "".join(f"--{k}: {v};" for k, v in tokens.items())
+
     return f":root{{{decl(dark)}}}\n@media (prefers-color-scheme: light){{:root{{{decl(light)}}}}}\n"
 
 
@@ -348,26 +367,26 @@ nav a:hover{background:var(--card-hover)}
 nav a.cur{background:var(--brand);color:var(--on-brand)}
 nav .ol a{padding-left:20px;color:var(--text-dim);font-size:12.5px}
 nav .ol a.l3{padding-left:32px}
-main{margin-left:270px;padding:28px 48px 120px;max-width:1280px;overflow-wrap:anywhere;min-width:0}
+main{margin:var(--space-5) var(--space-5) var(--space-6) calc(270px + var(--space-5));padding:var(--space-4) 40px 80px;max-width:1280px;overflow-wrap:anywhere;min-width:0;background:var(--card);border:1px solid var(--border);border-radius:10px}
 h1{font-size:26px;border-bottom:1px solid var(--border);padding-bottom:8px}
 h2{font-size:21px;margin-top:40px;border-bottom:1px solid var(--border);padding-bottom:4px}
 h3{font-size:17px;margin-top:28px}
 a{color:var(--info)}
-code{font-family:var(--font-mono);background:var(--card);padding:1px 5px;border-radius:4px;font-size:.88em}
-pre{background:var(--card);border:1px solid var(--border);padding:12px 14px;border-radius:6px;overflow:auto;line-height:1.45}
+code{font-family:var(--font-mono);background:var(--win);padding:1px 5px;border-radius:4px;font-size:.88em}
+pre{background:var(--win);border:1px solid var(--border);padding:12px 14px;border-radius:6px;overflow:auto;line-height:1.45}
 pre code{background:none;padding:0}
 table{border-collapse:collapse;margin:12px 0;font-size:14px;display:block;overflow:auto;max-width:100%}
 th,td{border:1px solid var(--border);padding:5px 10px;vertical-align:top}
-th{background:var(--card)}
-blockquote{margin:12px 0;padding:6px 14px;border-left:4px solid var(--border-hover);color:var(--text-dim);background:var(--card)}
-details{margin:8px 0;border:1px solid var(--border);border-radius:6px;padding:4px 12px;background:var(--card)}
+th{background:var(--win)}
+blockquote{margin:12px 0;padding:6px 14px;border-left:4px solid var(--border-hover);color:var(--text-dim);background:var(--win)}
+details{margin:8px 0;border:1px solid var(--border);border-radius:6px;padding:4px 12px;background:var(--win)}
 summary{cursor:pointer;color:var(--text-dim)}
 .d2{border:1px solid var(--border);border-radius:6px;padding:12px;margin:12px 0;overflow:auto;text-align:center}
 .d2 svg{max-width:100%;height:auto}
 main img{max-width:100%;height:auto}
 :target{scroll-margin-top:16px;background:var(--warn-bg)}
 footer{color:var(--muted);font-size:13px}
-@media(max-width:760px){nav{position:relative;width:100%;max-height:42vh;border-right:0;border-bottom:1px solid var(--border)}main{margin-left:0;padding:18px 16px 60px}}
+@media(max-width:760px){nav{position:relative;width:100%;max-height:42vh;border-right:0;border-bottom:1px solid var(--border)}main{margin:0;border-radius:0;padding:18px 16px 60px}}
 """
 
 
@@ -396,7 +415,10 @@ def _rewrite_links(body: str, page: Page, out_dir: Path, md_to_html: dict[Path, 
         path = md_to_html.get(target) or os.path.relpath(target, out_dir.resolve()).replace(os.sep, "/")
         new = urlunsplit(("", "", quote(path, safe="/._-"), parts.query, parts.fragment))
         return f'{attr}="{html.escape(new, quote=True)}"'
-    return re.sub(r'''\b(href|src)=(["'])(.*?)\2''', swap, body)
+    # 代码块里的示例（<pre>…</pre>）原样保留，只改真链接。
+    pieces = re.split(r"(<pre[\s>].*?</pre>)", body, flags=re.S)
+    return "".join(piece if piece.startswith("<pre") else
+                   re.sub(r'''\b(href|src)=(["'])(.*?)\2''', swap, piece) for piece in pieces)
 
 
 def _d2_svg(source: str) -> str:
@@ -533,6 +555,7 @@ _SELF_NEGATIVES = (
     ("锚点不存在", "\n[坏锚](other.md#没有这节)\n"),
     ("没有闭合", "\n<details><summary>没关</summary>\n"),
     ("id 重复", '\n<a id="same"></a><a id="same"></a>\n'),
+    ("没装 d2", "\n```d2\na -> b\n```\n"),
 )
 
 
@@ -551,7 +574,15 @@ def self_test(echo: Callable[[str], None] = print) -> int:
         if got := run(_SELF_GOOD):
             failures.append(f"正样本被误拦：{got}")
         for expect, extra in _SELF_NEGATIVES:
-            got = run(_SELF_GOOD + extra)
+            if expect == "没装 d2":
+                saved_path = os.environ.get("PATH", "")
+                os.environ["PATH"] = str(root / "no-such-bin")  # 模拟本机没装 d2
+                try:
+                    got = run(_SELF_GOOD + extra)
+                finally:
+                    os.environ["PATH"] = saved_path
+            else:
+                got = run(_SELF_GOOD + extra)
             if not any(expect in p for p in got):
                 failures.append(f"负样本没拦住（应报「{expect}」）：{extra.strip()}")
         if got := run(_SELF_GOOD):
@@ -561,7 +592,7 @@ def self_test(echo: Callable[[str], None] = print) -> int:
             echo(f"⛔ 自证失败：{f}")
         return 1
     echo(f"✓ 自证通过：正样本全过，{len(_SELF_NEGATIVES)} 个负样本"
-         "（缺例子 / 空理由豁免 / 姓名 / 个人路径 / 断链 / 坏锚点 / details 没闭合 / id 重复）全部拦下")
+         "（缺例子 / 空理由豁免 / 姓名 / 个人路径 / 断链 / 坏锚点 / details 没闭合 / id 重复 / 没装 d2）全部拦下")
     return 0
 
 
@@ -592,7 +623,10 @@ def open_doc(path: str | os.PathLike, anchor: str = "", *,
 def _redirect_page(url: str) -> Path:
     folder = Path(tempfile.gettempdir()) / "msui-open-doc"
     folder.mkdir(parents=True, exist_ok=True)
-    page = folder / "open.html"
+    # 每次一张新跳转页：连点两份文档时，前一次的浏览器还没读到跳转页也不会被后一次改掉。
+    fd, name = tempfile.mkstemp(prefix="open-", suffix=".html", dir=folder)
+    os.close(fd)
+    page = Path(name)
     page.write_text('<!doctype html><meta charset="utf-8">'
                     f"<script>location.replace({json.dumps(url)})</script>", encoding="utf-8")
     return page
@@ -605,7 +639,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="msui-docs", description="把目录下的 md 生成成统一样式的单页 html（核查不过不写产物）。")
     parser.add_argument("src", nargs="?", help="源目录（放 md 的地方，比如 docs）")
-    parser.add_argument("out", nargs="?", help="产物目录（比如 docs/html）")
+    parser.add_argument("out", nargs="?", help="产物目录（比如 pages/docs）")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="只核查，不写文件")
     mode.add_argument("--self-test", action="store_true", help="自证：各道核查对正负样本都判对")
