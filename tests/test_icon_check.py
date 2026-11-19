@@ -161,3 +161,41 @@ def test_several_problems_are_all_listed(tmp_path):
     assert any("没写 icon" in p and "miniprog.toml" in p for p in problems)
     assert any("缺 48、32、16 档" in p for p in problems)
     assert any("没写 icon=" in p for p in problems)
+
+
+def test_truncated_png_is_reported_not_raised(tmp_path):
+    _only(gate.icon_problems(_repo(tmp_path, png=_png()[:20])), "不是 PNG")
+
+
+def test_spec_icon_with_backslashes_is_understood(tmp_path):
+    spec = 'exe = EXE(pyz, icon="assets\\\\icon.ico")\n'
+    assert gate.icon_problems(_repo(tmp_path, spec=spec)) == []
+
+
+def test_spec_icon_outside_the_repo_is_reported(tmp_path):
+    for icon in ('"C:/icons/icon.ico"', '"/abs/icon.ico"', '"../icon.ico"'):
+        root = _repo(tmp_path / icon.strip('"').replace("/", "_").replace(":", ""), spec=f"exe = EXE(pyz, icon={icon})\n")
+        _only(gate.icon_problems(root), "icon= 要指向仓内的 ico")
+
+
+def test_spec_icon_written_as_fstring_is_understood(tmp_path):
+    spec = 'exe = EXE(pyz, icon=f"{SPECPATH}/assets/icon.ico")\n'
+    assert gate.icon_problems(_repo(tmp_path, spec=spec)) == []
+
+
+def test_spec_icon_through_a_variable_is_followed(tmp_path):
+    spec = 'import os\nICON = os.path.join(SPECPATH, "assets", "real.ico")\nexe = EXE(pyz, icon=ICON)\n'
+    root = _repo(tmp_path, spec=spec)
+    _only(gate.icon_problems(root), "assets/real.ico", "不存在")
+    (root / "assets" / "real.ico").write_bytes(_ico())
+    assert gate.icon_problems(root) == []
+
+
+def test_spec_icon_that_cannot_be_read_is_reported(tmp_path):
+    spec = 'exe = EXE(pyz, icon=pick_icon())\n'
+    _only(gate.icon_problems(_repo(tmp_path, spec=spec)), "读不出")
+
+
+def test_spec_icon_joined_outside_the_repo_is_reported(tmp_path):
+    spec = 'import os\nexe = EXE(pyz, icon=os.path.join(SPECPATH, "..", "shared.ico"))\n'
+    _only(gate.icon_problems(_repo(tmp_path / "repo", spec=spec)), "icon= 要指向仓内的 ico")

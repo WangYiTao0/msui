@@ -51,6 +51,7 @@ import struct
 import sys
 import threading
 import time
+import tomllib
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -67,16 +68,14 @@ from .resources import (
 
 __all__ = [
     "ALLOWED_HEX_FILE_NAMES",
-    "DEFAULT_ICO",
-    "ICON_PNG_MAX_BYTES",
-    "ICON_PNG_SIZE",
-    "ICO_SIZES",
-    "MINIPROG_TOML_NAME",
     "BASE_TOKEN_PAIRS",
     "CONTROL_MINIMUM",
     "DISABLED_MINIMUM",
     "HEX_COLOR_RE",
     "HEX_LITERAL_RE",
+    "ICON_PNG_MAX_BYTES",
+    "ICON_PNG_SIZE",
+    "ICO_SIZES",
     "LAYOUT_CSS_NAME",
     "NON_HEX_TOKENS",
     "OVERRIDE_CSS_NAME",
@@ -623,11 +622,11 @@ def format_base_redefinitions(offenders: Mapping[Path, list[str]]) -> str:
 # 只读文件头和 ico 目录，不依赖 Pillow；spec 用 ast 读，不执行它。
 # ---------------------------------------------------------------------------
 
-MINIPROG_TOML_NAME = "miniprog.toml"
+_MINIPROG_TOML_NAME = "miniprog.toml"
 ICON_PNG_SIZE = 256  # 边长（像素），正方形
 ICON_PNG_MAX_BYTES = 64 * 1024
 ICO_SIZES = (256, 48, 32, 16)
-DEFAULT_ICO = "assets/icon.ico"  # spec 的 icon= 读不出路径时按约定位置找
+_DEFAULT_ICO = "assets/icon.ico"  # spec 没写 icon= 时，ico 按约定位置查
 
 _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -647,30 +646,28 @@ def icon_problems(repo_root: Path | str) -> list[str]:
 
 
 def _toml_icon_problems(root: Path) -> list[str]:
-    import tomllib
-
-    toml_path = root / MINIPROG_TOML_NAME
+    toml_path = root / _MINIPROG_TOML_NAME
     if not toml_path.is_file():
-        return [f"{MINIPROG_TOML_NAME} 不存在（仓根要有这份接入文件，并写 icon = \"assets/icon.png\"）"]
+        return [f"{_MINIPROG_TOML_NAME} 不存在（仓根要有这份接入文件，并写 icon = \"assets/icon.png\"）"]
     try:
         data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
-        return [f"{MINIPROG_TOML_NAME} 读不了：{exc}"]
+        return [f"{_MINIPROG_TOML_NAME} 读不了：{exc}"]
     icon = data.get("icon")
     if not icon:
-        return [f"{MINIPROG_TOML_NAME} 没写 icon（写一行 icon = \"assets/icon.png\"，指向仓内的 256×256 PNG）"]
+        return [f"{_MINIPROG_TOML_NAME} 没写 icon（写一行 icon = \"assets/icon.png\"，指向仓内的 256×256 PNG）"]
     if not isinstance(icon, str):
-        return [f"{MINIPROG_TOML_NAME} 的 icon 要写成字符串路径，现在是 {icon!r}"]
+        return [f"{_MINIPROG_TOML_NAME} 的 icon 要写成字符串路径，现在是 {icon!r}"]
     png = (root / icon).resolve()
     if Path(icon).is_absolute() or not png.is_relative_to(root):
-        return [f"{MINIPROG_TOML_NAME} 的 icon = \"{icon}\" 要写仓内的相对路径（发版时从仓里取这个文件）"]
+        return [f"{_MINIPROG_TOML_NAME} 的 icon = \"{icon}\" 要写仓内的相对路径（发版时从仓里取这个文件）"]
     if not png.is_file():
-        return [f"{MINIPROG_TOML_NAME} 的 icon 指向的 {icon} 不存在（跑一遍 assets/make_icon.py 生成）"]
+        return [f"{_MINIPROG_TOML_NAME} 的 icon 指向的 {icon} 不存在（跑一遍 assets/make_icon.py 生成）"]
     return [f"{icon}：{p}" for p in _png_problems(png.read_bytes())]
 
 
 def _png_problems(data: bytes) -> list[str]:
-    if not data.startswith(_PNG_SIGNATURE) or data[12:16] != b"IHDR":
+    if len(data) < 24 or not data.startswith(_PNG_SIGNATURE) or data[12:16] != b"IHDR":
         return ["不是 PNG 文件（要 256×256、带透明的 PNG）"]
     width, height = struct.unpack(">II", data[16:24])
     problems = []
@@ -705,16 +702,45 @@ def _spec_and_ico_problems(root: Path) -> list[str]:
                 problems.append(f"{spec.name} 的 EXE(...) 没写 icon=（加一行 "
                                 'icon=os.path.join(SPECPATH, "assets", "icon.ico")）')
                 continue
-            parts = [n.value for n in ast.walk(icon) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
-            ico_paths.add("/".join(parts) if parts else DEFAULT_ICO)
+            rel = _spec_icon_path(icon, tree)
+            if rel is None:
+                problems.append(f"{spec.name} 的 icon= 读不出指向哪个文件（照约定写 "
+                                'icon=os.path.join(SPECPATH, "assets", "icon.ico")）')
+                continue
+            if Path(rel).is_absolute() or ":" in rel or not (root / rel).resolve().is_relative_to(root):
+                problems.append(f"{spec.name} 的 icon= 要指向仓内的 ico（写成 "
+                                f'os.path.join(SPECPATH, "assets", "icon.ico")），现在是 {rel}')
+                continue
+            ico_paths.add(rel)
     # spec 没写 icon= 时 ico 照样要在约定位置、四档齐全——两件事分开报。
-    for rel in sorted(ico_paths or {DEFAULT_ICO}):
+    for rel in sorted(ico_paths or {_DEFAULT_ICO}):
         ico = root / rel
         if not ico.is_file():
-            problems.append(f"spec 的 icon= 指向的 {rel} 不存在（跑一遍 assets/make_icon.py 生成）")
+            problems.append(f"exe 图标 {rel} 不存在（跑一遍 assets/make_icon.py 生成）")
         else:
             problems.extend(f"{rel}：{p}" for p in _ico_problems(ico.read_bytes()))
     return problems
+
+
+def _spec_icon_path(icon: ast.expr, tree: ast.Module) -> str | None:
+    """读 spec 里 icon= 指向的仓内相对路径；读不出回 None。
+
+    只认约定写法：字符串常量依次拼成路径——``os.path.join(SPECPATH, "assets",
+    "icon.ico")``、``"assets/icon.ico"``（反斜杠也认）、``f"{SPECPATH}/assets/icon.ico"``；
+    ``icon=ICON`` 这种变量追到 spec 顶层对它的唯一一次赋值。表达式不是单个字面量时
+    （开头是 SPECPATH 这类），去掉拼出来的前导 ``/``——它本来接在仓根后面。
+    """
+    if isinstance(icon, ast.Name):
+        assigned = [node.value for node in tree.body if isinstance(node, ast.Assign)
+                    and any(isinstance(tg, ast.Name) and tg.id == icon.id for tg in node.targets)]
+        if len(assigned) != 1:
+            return None
+        icon = assigned[0]
+    parts = [n.value for n in ast.walk(icon) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+    if not parts:
+        return None
+    rel = re.sub(r"/+", "/", "/".join(parts).replace("\\", "/"))
+    return rel if isinstance(icon, ast.Constant) else rel.lstrip("/")
 
 
 def _ico_problems(data: bytes) -> list[str]:

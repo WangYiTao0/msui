@@ -1772,7 +1772,7 @@ from PIL import Image, ImageDraw
 BRAND = "#db021d"  # msui tokens.css 的 --brand（图标底板正是品牌用途）
 WHITE = "#ffffff"
 SIZE = 256  # 基准画布；ico 的其余档由 LANCZOS 下采样
-ICO_SIZES = [(256, 256), (48, 48), (32, 32), (16, 16)]
+ICO_LAYERS = [(256, 256), (48, 48), (32, 32), (16, 16)]  # ico 里的四档
 HERE = Path(__file__).resolve().parent
 
 
@@ -1791,7 +1791,7 @@ def main() -> None:
     d = ImageDraw.Draw(img)
     d.rounded_rectangle([8, 8, SIZE - 8, SIZE - 8], radius=56, fill=BRAND)  # 56/248 ≈ 22%
     draw_symbol(d)
-    img.save(HERE / "icon.ico", sizes=ICO_SIZES)
+    img.save(HERE / "icon.ico", sizes=ICO_LAYERS)
     img.save(HERE / "icon.png", optimize=True)
     print(f"icon -> {HERE / 'icon.ico'}, {HERE / 'icon.png'}")
 
