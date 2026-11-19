@@ -15,7 +15,7 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 两处版本号**：
 
 ```
-msui @ https://github.com/WangYiTao0/msui/releases/download/v0.11.0/msui-0.11.0-py3-none-any.whl
+msui @ https://github.com/WangYiTao0/msui/releases/download/v0.12.0/msui-0.12.0-py3-none-any.whl
 ```
 
 另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
@@ -64,7 +64,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.11.0"
+MSUI_PINNED = "0.12.0"
 
 
 class Api:
@@ -1743,6 +1743,150 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
 宿主平台客户端列表里的图标是另一回事（接入契约 §3 的 `icon` 目前是死字段，
 等那侧功能定型），本节只管 exe 自己的图标。
 
+## 说明文档：生成器与写法（0.12.0 起，可选）
+
+程序里「文档」按钮打开的业务说明，和开发中写给用户拍板的说明，用同一套生成器、同一套写法。
+生成器把一个目录下的 md 生成成单页 html：左侧目录（站内各篇 + 本篇大纲），配色是 msui 深浅
+两套 token、跟随系统深浅色（文档在系统浏览器里打开，读不到程序的主题偏好）。
+
+### 装和用
+
+生成器是可选依赖组 `docs`，**只在生成文档时装**，不进 `requirements.txt`、不进冻结产物：
+
+```
+pip install markdown-it-py
+```
+
+（等价于装 `msui[docs]`；msui 本身已经由 requirements 那行装好了。）然后在仓根：
+
+```
+msui-docs docs pages/docs            # 生成：docs/*.md → pages/docs/*.html
+msui-docs docs pages/docs --check    # 只核查，不写文件
+msui-docs --self-test                # 自证：各道核查对正负样本都判对
+```
+
+`msui-docs` 与 `python -m msui.docgen` 等价。源目录里每份 md 出一页（不进子目录），
+`README.md` / `index.md` 出成 `index.html`。产物放 `pages/` 下面，冻结产物随 `("pages", "pages")`
+一起收进去，不用改 spec；产物入仓（CI 上不跑生成器），改了 md 记得重新生成。
+
+支持表格、引用块、`<details>` 折叠、标题锚点（GitHub 写法：`## 1. 怎么数件数` 的锚点是
+`#1-怎么数件数`，在 GitHub 上看 md 和看 html 跳的是同一个地方）。流程图写成 ```` ```d2 ````
+代码块，生成时调本机 `d2` 出静态 SVG 嵌进页面、不依赖在线脚本；本机没装 d2 就报清楚并失败。
+
+**核查任一项不过，一份产物都不写、退出码 1**，逐条列出文件和行号：
+
+- **例子**：每个二级节至少有一个「例」——`### 例 N…` 或 `### 例：…` 这样的三级标题（「例外」
+  「例如」不算），或以 `**例 N` 开头的段落（代码块里的不算）。第一个二级标题之前的文首概述、标题以「请你回复」「附」开头的节自动豁免
+  （前面的编号 `5.` 不算在内）；
+- **姓名**：`名.姓` 形态的英文姓名、`C:\Users\<人名>` 路径（文档会随程序外发，宿主平台接入契约
+  要求产物不含员工姓名和个人路径），以及 `--names 名单文件`（一行一个名字，`#` 开头是注释）里的
+  每个名字。`名.姓` 形态但其实是代码符号的，用 `--allow 符号` 放行（可重复）；
+- **链接**：本地链接指向的文件存在，带 `#锚` 的锚点存在；`<details>` 成对，id 不重复；
+- **d2**：有 d2 流程图而本机没装 d2。
+
+### 程序里打开文档
+
+js_api 上放一个方法，调 `msui.docgen.open_doc`：系统浏览器打开那一页，并跳到指定的节（Windows
+上会经一张临时跳转页，保住 `#锚`）。它不依赖 markdown-it-py，运行时直接用：
+
+```python
+from msui import docgen
+
+class Api:
+    def open_doc(self, page: str = "index.html", anchor: str = "") -> dict:
+        """「文档」按钮：按当前页打开对应说明；anchor 是标题锚点（不带 #）。"""
+        return docgen.open_doc(page_dir() / "docs" / page, anchor)
+```
+
+返回 `{"opened": True/False, "url": …, "message": 给用户看的一句话}`；文件不在不抛、不拿别的页
+顶上，`opened` 为 False，把 `message` 显示出来即可。
+
+### 文档写法
+
+业务用户读不懂规则，多半是因为不知道规则落到自己的数据上是什么样，所以**讲规则的节都要配例子**。
+照这几条写（AI 写文档时同样照做）：
+
+1. **文首一段**：这份文档讲什么、数据取自哪里（哪一周、哪个数据文件、哪天的）。要用户拍板的，
+   加一句「文末『请你回复』列了需要你决定的几件事」；
+2. **每个讲规则的节配「例 N」**，全文连续编号：
+   - 用真实数据，写明来源和日期，读者能自己去核对；
+   - 用表格对照「输入 → 结果」；改法类的再对照「现在 → 改后」；
+   - 例子写成三级标题 `### 例 3：…`，或段落开头写 `**例 3：…**`；
+3. **补充说明放引用块**（`> …`）：附带的情况、暂时的做法、为什么这样定；
+4. **拍板类文档的文末是「请你回复」**：逐条写问题、给选项、写推荐和理由，用户不用在全文里找；
+5. **长的附录**（原始字段表、全量清单）放 `<details><summary>…</summary>` 折叠，或放进「附：」
+   开头的节；
+6. **豁免**：某节确实不需要例子（只解释名词、只列链接），在节内写一行
+   `<!-- 无需例子：理由 -->`，理由不能空——空理由和漏写一样被拦。
+
+一份过得了核查的样子（样例程序与数据是虚构的，真实文档要换成你自己的数据和来源）：
+
+```markdown
+<!-- 文档写法示例 -->
+# 件数统计怎么算
+
+这份文档说明件数统计怎样从数据文件算出件数，以及空行要不要算。例子取自 WK47 的样例数据
+（2026-11-18 的「件数.xlsx」）。
+
+文末「请你回复」列了需要你决定的几件事。
+
+## 1. 用到的列
+
+<!-- 无需例子：只解释列名，没有规则 -->
+
+| 列 | 是什么 |
+|---|---|
+| 编号 | 一件货的编号 |
+| 数量 | 这一行有几件 |
+
+## 2. 件数怎么算
+
+每行的「数量」相加；同一编号出现两次只算一次。
+
+**例 1：同一编号出现两次**
+
+| 输入（编号 · 数量） | 结果 |
+|---|---|
+| A01 · 3，A02 · 2，A01 · 3 | 5 件（A01 只算一次） |
+
+> 同一编号两行数量不同时，取第一行，并在日志区记一条告警。
+
+## 3. 要你决定的：空行算不算
+
+### 例 2：中间夹一个空行
+
+| | 现在 | 改后 |
+|---|---|---|
+| A01 · 3，（空行），A02 · 2 | 读到空行就停，得 3 件 | 跳过空行，得 5 件 |
+
+## 请你回复
+
+1. 空行：A 跳过空行接着读 / B 读到空行就停（现在的做法）。推荐 A：样例数据里空行都是手工
+   插的分隔，不是表尾。
+```
+
+生成前用 `--check` 看一遍；缺例子的节会被点名，例如
+`docs/件数.md:12: 「2. 件数怎么算」这一节没有例子`。
+
+## 从 0.11.x 升到 0.12.0
+
+0.12.0 新增两样，都是 opt-in：**运行日志区**（`msui.runlog` + `runlog.js` + base.css 的
+`.runlog`，见 §3「运行日志区」）和**说明文档生成器**（`msui.docgen`，见「说明文档：生成器与写法」）。
+旧的 `<pre class="log">` 原样不动，不换新部件的页面一个像素不变。升级时按下面做：
+
+1. **钉版本几处一起改**：`requirements.txt` 那行 wheel URL 里的两处版本号（路径段 `v0.12.0` +
+   文件名 `msui-0.12.0-…`），加上冒烟里的 `MSUI_PINNED` 常量；
+2. **`pages/.gitignore` 补一行 `runlog.js`**（写法见上文「打包」一节末尾）；**`.spec` 的副本过滤**
+   文件名元组补上 `"runlog.js"`。`copy_assets` 不管用不用日志区都会落下它，不补的话副本以未跟踪
+   文件出现。拿 `ASSET_NAMES` 对账这两处的测试会先红、补齐转绿——别把测试期望改回写死的清单；
+3. **换用运行日志区**（要换时）：照 §3「运行日志区」三步接上，删掉自己的轮询、折叠和等级上色
+   代码。**已经自写了 `.runlog` 样式的（PQPR 的 `pages/layout.css` 里有 `.runlog` 和
+   `.runlog .eyebrow button`），迁移时删掉自写块**——它们和 base.css 的同名规则会叠加；
+   自写的 Python 取日志接口换成 `RunLog.since()`，等级改由 Python 给字段，不再从正文里认字样；
+4. **用文档生成器**（要用时）：`pip install markdown-it-py`（只装在开发机、不进
+   requirements），`msui-docs docs pages/docs --check` 先看哪些节缺例子，补齐后生成。原来自写
+   的 md 转 html 脚本删掉；「文档」按钮改调 `msui.docgen.open_doc`。
+
 ## 从 0.10.x 升到 0.11.0
 
 0.11.0 把几个小程序各自抄了一份的部件收回了 msui：步骤卡 `.step`、读数卡
@@ -1753,7 +1897,7 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
 1. **钉版本几处一起改**：`requirements.txt` 那行 wheel URL 里的两处版本号
    （路径段 `v0.11.0` + 文件名 `msui-0.11.0-…`），加上冒烟里的 `MSUI_PINNED`
    常量。漏改一处，冒烟的横幅断言就红；
-2. **`pages/.gitignore` 补一行 `theme.js`**（四行写法见上文「打包」一节末尾）；
+2. **`pages/.gitignore` 补一行 `theme.js`**（写法见上文「打包」一节末尾）；
    **`.spec` 的副本过滤**文件名元组补上 `"theme.js"`（样板里这个函数改名叫
    `_is_landed_asset`，旧名照用也行）；拿 `ASSET_NAMES` 对账这两处的测试会先红、
    补齐转绿——别把测试期望改回写死的清单；
@@ -1833,7 +1977,7 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
 ```text
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
-   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.11.0/msui-0.11.0-py3-none-any.whl
+   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.12.0/msui-0.12.0-py3-none-any.whl
    另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
    要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
@@ -1842,7 +1986,7 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
    msui.shell.run(serve_dir / "index.html", title="应用名")。开窗一律用
    copy_assets 的返回值。
 3. 页面 <head> 依次相对引用 tokens.css、base.css。copy_assets 每次启动无条件
-   覆盖落下这两份外加可选的 tokens-light.css 与 theme.js，四份都不入仓、不手改
+   覆盖落下这两份外加可选的 tokens-light.css、theme.js、runlog.js，五份都不入仓、不手改
    （pages/.gitignore 排除它们）。run() 默认 text_select=True（页面文字可选中
    复制），按钮 / 分段 / 开关 / 标签由 base.css 声明不可选——不要自己写
    user-select。
@@ -1926,6 +2070,22 @@ exe 资源走），但**长相有全家约定**，让一排小程序在任务栏
     <div class="kpis"><div class="card kpi"> 里 .lbl / .val（单位 <small>）/
     .sub，没数据时 .val 写「—」、副行包 .dim，告警态 .kpi.warn。数据网格里
     整句话的列给单元格挂 class="wrap"。
+19. 运行日志（从 msui README §3「运行日志区」起步）：Python 侧用
+    msui.runlog.RunLog 记行（info / warn / error 三档，等级是字段，页面不认正文
+    字样），start_run(名称) / end_run("ok" | "error" | "stopped", 一句给业务用户
+    看的结果) 把一段日志归成一组；已在用 logging 的程序加 RunLogHandler。js_api
+    放 get_log(since) 原样回 runlog.since(since)（不包 Serializer）。页面放
+    <section class="runlog" data-runlog="get_log"> 那段标准标记，</body> 前
+    <script src="runlog.js"></script>；不写轮询、折叠、等级配色。旧的
+    <pre class="log"> 不动。
+20. 说明文档：md 放 docs/，用 msui-docs docs pages/docs 生成（开发机
+    pip install markdown-it-py，不进 requirements），先跑 --check。按 msui README
+    「文档写法」写：文首一段讲这份文档讲什么、数据取自哪里；每个二级节配「例 N」
+    （### 例 N：… 三级标题，或以 **例 N：…** 开头的段落），用真实数据并写明来源和
+    日期，用表格对照输入 → 结果（改法类再对照现在 → 改后）；补充说明放引用块；
+    拍板类文档文末写「请你回复」，逐条给选项和推荐；确实不需要例子的节写
+    <!-- 无需例子：理由 -->。文档里不写员工姓名和个人路径。「文档」按钮调
+    msui.docgen.open_doc(路径, 锚点)。
 ```
 
 ## 发布（维护者）

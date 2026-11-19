@@ -179,3 +179,20 @@ def test_landed_copies_are_kept_out_of_git_and_out_of_the_bundle_everywhere():
     match = re.search(r"parts\[-1\] in \(([^)]*)\)", spec)
     assert match, "app.spec 里找不到 _is_landed_asset 的文件名清单"
     assert set(re.findall(r'"([^"]+)"', match.group(1))) == expected
+
+
+def test_doc_writing_example_passes_the_generator_check(tmp_path, capsys):
+    """README「文档写法」里那份示例 md（票 #30）照抄就过得了生成器核查——
+    写法规范给的样子自己先合规；它一旦缺了例子、漏了理由，这条当场红。"""
+    from msui import docgen
+
+    blocks = re.findall(r"```markdown\n<!-- 文档写法示例 -->\n(.*?)```", README, re.DOTALL)
+    assert len(blocks) == 1, "README「文档写法」里应恰好有一段挂「文档写法示例」标记的 md"
+    sample = blocks[0]
+    # 规范里要求的几样，示例里都得有一份
+    for piece in ("**例 1", "### 例 2", "> ", "## 请你回复", "<!-- 无需例子：", "现在", "改后"):
+        assert piece in sample, f"示例 md 里缺「{piece}」"
+    src = tmp_path / "docs"
+    src.mkdir()
+    (src / "README.md").write_text(sample, encoding="utf-8")
+    assert docgen.main([str(src), str(tmp_path / "html"), "--check"]) == 0, capsys.readouterr().out

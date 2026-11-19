@@ -12,6 +12,9 @@
   - :mod:`msui.bridge` —— js_api 桥的通用件（串行化、忙碌应答、前端日志）；
   - :mod:`msui.runlog` —— 运行日志缓冲（按「一次运行」分组、增量读取、按天落
     文件、logging.Handler），页面侧配同包落地的 runlog.js；
+  - :mod:`msui.docgen` —— 说明文档生成器（md → 统一侧栏 html，生成前核查例子、姓名、
+    链接和锚点；命令 ``msui-docs``，要装可选组 ``docs``）与 ``open_doc``（系统浏览器
+    打开文档并跳到锚点，运行时可用）；
   - :mod:`msui.testing` —— 样式闸门函数库（对比度校验、防游离色值扫描）。
 
 包自带 PyInstaller hook：下游 spec 对 msui 的资源与元数据零配置。

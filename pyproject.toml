@@ -3,7 +3,7 @@ name = "msui"
 # 版本号**只写这里一处**（tests/test_version.py 盯着这个单一来源）。
 # 发布：git tag v<这个号> && git push origin v<这个号>，
 # CI 在装依赖之前核对 tag 与这里一致，不一致当场 fail（scripts/check_tag_version.py）。
-version = "0.11.0"
+version = "0.12.0"
 description = "小程序共享 UI 运行时与样式（pywebview + WebView2）——骨架先行，功能后续迁入"
 readme = "README.md"
 # 本包要被同一批小程序装，下限与它们的运行环境对齐（3.11 起有 tomllib）。
@@ -12,13 +12,22 @@ requires-python = ">=3.11"
 # 本包，但作为发行版依赖必须声明——装了 msui 就该装得上开窗的底座）。
 dependencies = ["pywebview"]
 
+# 文档生成器命令行（要先装 docs 组；没装时它报一句怎么装、退出码 2）。
+[project.scripts]
+msui-docs = "msui.docgen:main"
+
 # PyInstaller 的 hook 发现入口：下游 spec 一行资源配置都不写也能收齐
 # 本包的静态资产与版本元数据（hook 内容见 src/msui/_pyinstaller/hook-msui.py）。
 [project.entry-points.pyinstaller40]
 hook-dirs = "msui._pyinstaller:get_hook_dirs"
 
 [project.optional-dependencies]
+# 文档生成器（msui.docgen，0.12.0 起）只在生成文档时要：pip install "msui[docs]"。
+# 不进运行时依赖——小程序本体和冻结产物都用不到它（tests/test_wheel.py 盯着）。
+docs = ["markdown-it-py>=3.0"]
 dev = [
+    # 生成器的测试要它；与 docs 组同一条，测试环境装 .[dev] 就够。
+    "markdown-it-py>=3.0",
     "pytest>=8.0",
     # tests/test_wheel.py 用 python -m build --no-isolation 真构建一次 wheel，
     # 所以 build 与 hatchling 都要装在 dev 环境里。
