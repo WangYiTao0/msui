@@ -68,3 +68,16 @@ def test_wheel_contains_msui_package(tmp_path):
     ).decode("utf-8")
     assert "[pyinstaller40]" in entry_points
     assert "hook-dirs = msui._pyinstaller:get_hook_dirs" in entry_points
+
+    # 文档生成器（票 #30）：模块进 wheel、命令行入口登记了；它的依赖 markdown-it-py
+    # 只在可选组 docs 里，**运行时依赖不含它**——小程序本体和冻结产物用不到它。
+    assert "msui/docgen.py" in names
+    assert "msui-docs = msui.docgen:main" in entry_points
+    metadata = zipfile.ZipFile(whl).read(f"msui-{version}.dist-info/METADATA").decode("utf-8")
+    requires = [line.split(":", 1)[1].strip() for line in metadata.splitlines()
+                if line.startswith("Requires-Dist:")]
+    runtime = [r for r in requires if "extra ==" not in r]
+    assert runtime == ["pywebview"], f"运行时依赖只该有 pywebview，实际：{runtime}"
+    docs_extra = [r for r in requires if "extra == 'docs'" in r or 'extra == "docs"' in r]
+    assert any(r.startswith("markdown-it-py") for r in docs_extra), requires
+    assert "Provides-Extra: docs" in metadata
