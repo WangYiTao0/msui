@@ -290,3 +290,58 @@ def test_reading_a_hand_broken_file_says_which_line(tmp_path):
 def test_log_file_path_points_at_todays_file(tmp_path):
     log = RunLog(log_dir=tmp_path, clock=FakeClock())
     assert log.log_file_path(dt.date(2026, 11, 18)) == tmp_path / "2026-11-18.log"
+
+
+# ---------------------------------------------------------------------------
+# 审查修复（#29）：怪字符读得回、文件写不进只提示一次、并发落文件不乱序
+# ---------------------------------------------------------------------------
+
+
+def test_carriage_returns_form_feeds_and_newlines_in_run_names_still_read_back(tmp_path):
+    """splitlines 会在 \\r、\\x0c 这类字符上断行，整份读不回。写入前 \\r\\n / \\r 统一成
+    \\n、运行名里的换行换成空格，读回按 \\n 切。"""
+    log = RunLog(log_dir=tmp_path, clock=FakeClock())
+    log.start_run("导出\n第二段")
+    log.info("甲\r\n乙\r丙\x0c丁\x0b戊")
+
+    entries = read_log_file(tmp_path / "2026-11-18.log")
+
+    assert entries == [
+        {"date": "2026-11-18", "time": "09:00:01", "level": "info", "run": "导出 第二段",
+         "text": "甲\n乙\n丙\x0c丁\x0b戊"},
+    ]
+
+
+def test_unwritable_log_dir_warns_once_in_memory_and_keeps_logging(tmp_path):
+    blocker = tmp_path / "不是目录"
+    blocker.write_text("占位", encoding="utf-8")
+    log = RunLog(log_dir=blocker / "日志", clock=FakeClock())
+
+    log.info("一")
+    log.info("二")
+
+    got = [(line["level"], line["text"]) for line in log.since(0)["lines"]]
+    assert got[0] == ("info", "一")
+    assert got[1][0] == "warn" and got[1][1].startswith("日志文件写不进：")
+    assert got[2:] == [("info", "二")]  # 只提示一次
+
+
+def test_concurrent_writers_land_in_the_file_in_seq_order(tmp_path):
+    log = RunLog(log_dir=tmp_path, clock=lambda: dt.datetime(2026, 11, 18, 9, 0, 0))
+    threads, per_thread = 6, 100
+    start = threading.Barrier(threads)
+
+    def write(tag: int) -> None:
+        start.wait()
+        for n in range(per_thread):
+            log.info(f"{tag}-{n}")
+
+    workers = [threading.Thread(target=write, args=(t,)) for t in range(threads)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join(timeout=10)
+
+    in_memory = [line["text"] for line in log.since(0)["lines"]]
+    in_file = [entry["text"] for entry in read_log_file(tmp_path / "2026-11-18.log")]
+    assert in_file == in_memory

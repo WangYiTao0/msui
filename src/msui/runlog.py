@@ -14,12 +14,15 @@
 - 增量读取：:meth:`RunLog.since` 收上次看到的序号，返回之后的新行、有变化的
   运行和最新序号，形状见该方法。行与运行的变化共用一条序号，运行结束也推进
   序号——只取「上次之后」的页面也收得到组头从「运行中」变成结论。
-- 线程安全：一把锁管全部状态，后台线程跑业务时照样记。
+- 线程安全：一把锁管内存里的状态，后台线程跑业务时照样记。落文件另有一把文件锁，
+  在内存锁之外写（拿到文件锁再放内存锁，文件里的先后与序号一致），慢盘不挡取日志。
 - 内存有上限：行数超过 ``max_lines`` 丢最旧的；运行条目超过 ``max_runs`` 丢最旧
   的已结束运行。序号从不回退。
 - 可选按天落文件：给了 ``log_dir`` 才写，``<log_dir>/<YYYY-MM-DD>.log`` 一天一份；
   一条 = 一行页眉 ``2026-11-18 09:12:05 [失败] 运行名`` + 原话每行缩进四格。人能
-  直接读，:func:`read_log_file` 能读回。只写行，不写运行的开始 / 结束。
+  直接读，:func:`read_log_file` 能读回。只写行，不写运行的开始 / 结束。正文里的
+  ``\r\n`` / ``\r`` 统一成 ``\n``，运行名里的换行换成空格。写不进（权限、目录是个
+  文件……）不抛：内存里追加一条 warn「日志文件写不进：…」，只提示一次。
 - :class:`RunLogHandler`：标准 ``logging`` 的 WARNING → warn、ERROR 及以上 → error、
   其余 → info，接进缓冲。
 """
@@ -68,6 +71,8 @@ class RunLog:
         clock: Callable[[], dt.datetime] = dt.datetime.now,
     ) -> None:
         self._lock = threading.Lock()
+        self._file_lock = threading.Lock()
+        self._file_warned = False
         self._lines: deque[dict] = deque(maxlen=max_lines)
         self._runs: OrderedDict[int, dict] = OrderedDict()  # id → {..., "rev": 最后变化的序号}
         self._max_runs = max_runs
@@ -82,19 +87,46 @@ class RunLog:
         """记一条。``level`` 只认 ``info`` / ``warn`` / ``error``，别的当场 ValueError。"""
         if level not in LEVELS:
             raise ValueError(f"运行日志的等级只认 {LEVELS}，收到 {level!r}")
-        text = str(text)
-        with self._lock:
+        text = _one_newline(str(text))
+        self._lock.acquire()
+        try:
             now = self._clock()
-            self._seq += 1
             run_name = self._runs[self._current]["name"] if self._current is not None else ""
-            self._lines.append({
-                "seq": self._seq,
-                "time": now.strftime("%H:%M:%S"),
-                "level": level,
-                "text": text,
-                "run": self._current,
-            })
-            self._append_file(now, level, run_name, text)
+            self._append_line(now, level, text)
+            if self.log_dir is None:
+                return
+            # 先拿文件锁再放内存锁：文件里的先后与序号一致，而写盘时内存锁已经放开
+            self._file_lock.acquire()
+        finally:
+            self._lock.release()
+        try:
+            error = self._append_file(now, level, run_name, text)
+        finally:
+            self._file_lock.release()
+        if error is not None:
+            self._warn_file_once(error)
+
+    def _append_line(self, now: dt.datetime, level: str, text: str) -> None:
+        """内存里追加一行（调用方持有内存锁）。"""
+        self._seq += 1
+        self._lines.append({
+            "seq": self._seq,
+            "time": now.strftime("%H:%M:%S"),
+            "level": level,
+            "text": text,
+            "run": self._current,
+        })
+
+    def _warn_file_once(self, error: OSError) -> None:
+        """文件写不进：只在内存里提示一次（不再落文件、不走 logging——Handler 挂在
+        根 logger 上时会绕回自己）。"""
+        with self._lock:
+            if self._file_warned:
+                return
+            self._file_warned = True
+            self._append_line(
+                self._clock(), "warn", f"日志文件写不进：{self.log_dir}（{error}）"
+            )
 
     def info(self, text: str) -> None:
         self.log("info", text)
@@ -117,7 +149,7 @@ class RunLog:
             run_id = self._seq
             self._runs[run_id] = {
                 "id": run_id,
-                "name": str(name),
+                "name": _one_newline(str(name)).replace("\n", " "),
                 "start": now.strftime("%H:%M:%S"),
                 "status": "running",
                 "result": "",
@@ -182,21 +214,24 @@ class RunLog:
         day = day or self._clock().date()
         return self.log_dir / f"{day.isoformat()}.log"
 
-    def _append_file(self, now: dt.datetime, level: str, run_name: str, text: str) -> None:
-        if self.log_dir is None:
-            return
+    def _append_file(
+        self, now: dt.datetime, level: str, run_name: str, text: str
+    ) -> OSError | None:
+        """追加一条进当天的文件（调用方持有文件锁）；写不进返回那个 OSError，不抛。"""
+        path = self.log_file_path(now.date())
+        assert path is not None
         header = f"{now:%Y-%m-%d %H:%M:%S} [{LEVEL_LABELS[level]}]"
         if run_name:
             header += f" {run_name}"
         block = header + "\n" + "".join(f"{_INDENT}{part}\n" for part in text.split("\n"))
         try:
-            self.log_dir.mkdir(parents=True, exist_ok=True)
-            with (self.log_dir / f"{now.date().isoformat()}.log").open("a", encoding="utf-8") as f:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # newline=""：写进去的就是 \n，不在 Windows 上被换成 \r\n
+            with path.open("a", encoding="utf-8", newline="") as f:
                 f.write(block)
-        except OSError:
-            # 写不进文件不能拖垮业务，也不能再记日志（Handler 挂在根 logger 上
-            # 时会绕回自己）。内存里那份照常在，页面照常看得到。
-            pass
+        except OSError as error:
+            return error
+        return None
 
 
 def read_log_file(path: str | Path) -> list[dict]:
@@ -206,7 +241,13 @@ def read_log_file(path: str | Path) -> list[dict]:
     认不出的行（手改坏了）ValueError，信息里带着那一行。
     """
     entries: list[dict] = []
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
+    # 按 \n 切、不用 splitlines：正文里的 \x0c、\x0b 这类字符不是行尾。
+    # newline=""：不让读取把 \r 当行尾翻译掉（写入时已统一成 \n）。
+    with Path(path).open(encoding="utf-8", newline="") as f:
+        lines = f.read().split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    for line in lines:
         match = _HEADER_RE.match(line)
         if match and match[3] in _LEVEL_BY_LABEL:
             entries.append({
@@ -225,6 +266,11 @@ def read_log_file(path: str | Path) -> list[dict]:
     for entry in entries:
         entry["text"] = "\n".join(entry["text"])
     return entries
+
+
+def _one_newline(text: str) -> str:
+    """\r\n 与单独的 \r 统一成 \n。"""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 class RunLogHandler(logging.Handler):
