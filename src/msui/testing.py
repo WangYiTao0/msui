@@ -1,6 +1,7 @@
 """消费者的测试零件：样式闸门纯函数 + 冒烟自动驾驶骨架。**不依赖 pytest。**
 
-两块内容：样式闸门（对比度校验 + 防游离色值扫描，本文件主体）与
+三块内容：样式闸门（对比度校验 + 防游离色值扫描，本文件主体）、图标检查
+:func:`icon_problems`（0.13.0 起，见该节注释）与
 :class:`SmokeDriver`（APP_SMOKE 冒烟的自动驾驶骨架，见类 docstring）。
 
 `tokens.css` 是唯一色源、`base.css` 只经 `var(--…)` 引用——这两条约定要靠
@@ -42,9 +43,11 @@
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
+import struct
 import sys
 import threading
 import time
@@ -64,6 +67,11 @@ from .resources import (
 
 __all__ = [
     "ALLOWED_HEX_FILE_NAMES",
+    "DEFAULT_ICO",
+    "ICON_PNG_MAX_BYTES",
+    "ICON_PNG_SIZE",
+    "ICO_SIZES",
+    "MINIPROG_TOML_NAME",
     "BASE_TOKEN_PAIRS",
     "CONTROL_MINIMUM",
     "DISABLED_MINIMUM",
@@ -84,6 +92,7 @@ __all__ = [
     "format_contrast_failures",
     "format_stray_hex",
     "hex_tokens",
+    "icon_problems",
     "merge_tokens",
     "redefined_base_selectors",
     "relative_luminance",
@@ -601,6 +610,129 @@ def format_base_redefinitions(offenders: Mapping[Path, list[str]]) -> str:
         + "\n".join(f"  {path}: {hits}" for path, hits in offenders.items())
         + "\n换个自己的类名写；别的小程序也会要的改动，开票回 msui。"
     )
+
+
+# ---------------------------------------------------------------------------
+# 图标检查（0.13.0 起）：每个小程序仓必须有图标
+#
+# 两样文件由同一份生成脚本（README「图标」一节）产出，各有去处：
+#   - assets/icon.ico：exe 图标（任务栏、标题栏、资源管理器），四档；PyInstaller
+#     spec 的 EXE(...) 用 icon= 挂上；
+#   - miniprog.toml 的 icon 指向的 PNG：宿主平台总程序的工具列表显示它，随发版
+#     上传。规格（256×256、≤ 64 KB）与宿主平台接入契约一致，改规格两边一起改。
+# 只读文件头和 ico 目录，不依赖 Pillow；spec 用 ast 读，不执行它。
+# ---------------------------------------------------------------------------
+
+MINIPROG_TOML_NAME = "miniprog.toml"
+ICON_PNG_SIZE = 256  # 边长（像素），正方形
+ICON_PNG_MAX_BYTES = 64 * 1024
+ICO_SIZES = (256, 48, 32, 16)
+DEFAULT_ICO = "assets/icon.ico"  # spec 的 icon= 读不出路径时按约定位置找
+
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+
+
+def icon_problems(repo_root: Path | str) -> list[str]:
+    """检查一个小程序仓的图标是否齐全、合规；回问题清单，空 = 全过。
+
+    检查三处文件：``miniprog.toml`` 的 ``icon``（仓内 PNG、256×256、≤ 64 KB）、
+    仓根 ``*.spec`` 的 ``EXE(...)`` 写了 ``icon=``、它指向的 ``.ico``（含
+    256/48/32/16 四档）。每条问题是一句能直接照着改的话，接进测试::
+
+        problems = gate.icon_problems(REPO_ROOT)
+        assert not problems, "\\n".join(problems)
+    """
+    root = Path(repo_root).resolve()
+    return _toml_icon_problems(root) + _spec_and_ico_problems(root)
+
+
+def _toml_icon_problems(root: Path) -> list[str]:
+    import tomllib
+
+    toml_path = root / MINIPROG_TOML_NAME
+    if not toml_path.is_file():
+        return [f"{MINIPROG_TOML_NAME} 不存在（仓根要有这份接入文件，并写 icon = \"assets/icon.png\"）"]
+    try:
+        data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+        return [f"{MINIPROG_TOML_NAME} 读不了：{exc}"]
+    icon = data.get("icon")
+    if not icon:
+        return [f"{MINIPROG_TOML_NAME} 没写 icon（写一行 icon = \"assets/icon.png\"，指向仓内的 256×256 PNG）"]
+    if not isinstance(icon, str):
+        return [f"{MINIPROG_TOML_NAME} 的 icon 要写成字符串路径，现在是 {icon!r}"]
+    png = (root / icon).resolve()
+    if Path(icon).is_absolute() or not png.is_relative_to(root):
+        return [f"{MINIPROG_TOML_NAME} 的 icon = \"{icon}\" 要写仓内的相对路径（发版时从仓里取这个文件）"]
+    if not png.is_file():
+        return [f"{MINIPROG_TOML_NAME} 的 icon 指向的 {icon} 不存在（跑一遍 assets/make_icon.py 生成）"]
+    return [f"{icon}：{p}" for p in _png_problems(png.read_bytes())]
+
+
+def _png_problems(data: bytes) -> list[str]:
+    if not data.startswith(_PNG_SIGNATURE) or data[12:16] != b"IHDR":
+        return ["不是 PNG 文件（要 256×256、带透明的 PNG）"]
+    width, height = struct.unpack(">II", data[16:24])
+    problems = []
+    if (width, height) != (ICON_PNG_SIZE, ICON_PNG_SIZE):
+        problems.append(f"尺寸是 {width}×{height}，要 {ICON_PNG_SIZE}×{ICON_PNG_SIZE}")
+    if len(data) > ICON_PNG_MAX_BYTES:
+        problems.append(f"{len(data) / 1024:.1f} KB，超过 {ICON_PNG_MAX_BYTES // 1024} KB 上限"
+                        "（简笔符号的图标远用不到这么大，保存时开 optimize）")
+    return problems
+
+
+def _spec_and_ico_problems(root: Path) -> list[str]:
+    specs = sorted(root.glob("*.spec"))
+    problems: list[str] = []
+    if not specs:
+        problems.append("仓根没有 PyInstaller .spec（exe 图标要在 spec 的 EXE(...) 里用 icon= 挂上）")
+    ico_paths: set[str] = set()
+    for spec in specs:
+        try:
+            tree = ast.parse(spec.read_text(encoding="utf-8"), filename=str(spec))
+        except SyntaxError as exc:
+            problems.append(f"{spec.name} 读不了：{exc}")
+            continue
+        exes = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                and getattr(node.func, "id", getattr(node.func, "attr", None)) == "EXE"]
+        if not exes:
+            problems.append(f"{spec.name} 里没找到 EXE(...)")
+            continue
+        for exe in exes:
+            icon = next((kw.value for kw in exe.keywords if kw.arg == "icon"), None)
+            if icon is None or (isinstance(icon, ast.Constant) and icon.value is None):
+                problems.append(f"{spec.name} 的 EXE(...) 没写 icon=（加一行 "
+                                'icon=os.path.join(SPECPATH, "assets", "icon.ico")）')
+                continue
+            parts = [n.value for n in ast.walk(icon) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+            ico_paths.add("/".join(parts) if parts else DEFAULT_ICO)
+    # spec 没写 icon= 时 ico 照样要在约定位置、四档齐全——两件事分开报。
+    for rel in sorted(ico_paths or {DEFAULT_ICO}):
+        ico = root / rel
+        if not ico.is_file():
+            problems.append(f"spec 的 icon= 指向的 {rel} 不存在（跑一遍 assets/make_icon.py 生成）")
+        else:
+            problems.extend(f"{rel}：{p}" for p in _ico_problems(ico.read_bytes()))
+    return problems
+
+
+def _ico_problems(data: bytes) -> list[str]:
+    if len(data) < 6 or struct.unpack("<HH", data[:4]) != (0, 1):
+        return ["不是 ico 文件"]
+    (count,) = struct.unpack("<H", data[4:6])
+    sizes = set()
+    for i in range(count):
+        entry = data[6 + 16 * i: 6 + 16 * (i + 1)]
+        if len(entry) < 16:
+            return ["ico 目录不完整（文件被截断了）"]
+        width, height = entry[0] or 256, entry[1] or 256
+        if width == height:
+            sizes.add(width)
+    missing = [s for s in ICO_SIZES if s not in sizes]
+    if missing:
+        return [f"缺 {'、'.join(map(str, missing))} 档（要 {'/'.join(map(str, ICO_SIZES))} 四档）"]
+    return []
 
 
 # ---------------------------------------------------------------------------

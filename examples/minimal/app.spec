@@ -41,6 +41,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,  # 真实小程序是窗口程序；冒烟只看退出码，不需要控制台
+    icon=os.path.join(SPECPATH, "assets", "icon.ico"),  # assets/make_icon.py 生成
 )
 coll = COLLECT(
     exe,

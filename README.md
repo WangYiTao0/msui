@@ -15,7 +15,7 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 两处版本号**：
 
 ```
-msui @ https://github.com/WangYiTao0/msui/releases/download/v0.12.0/msui-0.12.0-py3-none-any.whl
+msui @ https://github.com/WangYiTao0/msui/releases/download/v0.13.0/msui-0.13.0-py3-none-any.whl
 ```
 
 另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
@@ -64,7 +64,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.12.0"
+MSUI_PINNED = "0.13.0"
 
 
 class Api:
@@ -1658,6 +1658,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,  # 真实小程序是窗口程序；冒烟只看退出码，不需要控制台
+    icon=os.path.join(SPECPATH, "assets", "icon.ico"),  # assets/make_icon.py 生成
 )
 coll = COLLECT(
     exe,
@@ -1726,22 +1727,115 @@ runlog.js
 元素实测 computedStyle 比对——砍掉 base.css 的 `<link>` 时它必红。两条各管
 一半，都要有。
 
-## 图标（exe 级，风格约定）
+## 图标（必须有，0.13.0 起有检查）
 
-小程序的任务栏/资源管理器/标题栏图标不归 msui 运行时管（Windows 上它们都跟着
-exe 资源走），但**长相有全家约定**，让一排小程序在任务栏上像一族：
+**每个小程序仓都必须有图标**，两样文件，由同一份生成脚本一次产出、都入仓：
+
+| 文件 | 规格 | 挂在哪 | 用在哪 |
+|---|---|---|---|
+| `assets/icon.ico` | 内含 256 / 48 / 32 / 16 四档 | spec 的 `EXE(...)` 写 `icon=` | exe 的任务栏、标题栏、资源管理器图标 |
+| `assets/icon.png` | 256×256、透明底、≤ 64 KB | `miniprog.toml` 写 `icon` | 宿主平台总程序的工具列表（随发版上传） |
+
+PNG 的规格与宿主平台接入契约一致；两边改规格要一起改。
+
+**长相是全家约定**，让一排小程序在任务栏和工具列表上像一族：
 
 - **品牌红圆角底板 + 白色简笔符号**：底板为圆角方形、填 tokens 的 `--brand`
   （#db021d，图标正是品牌用途），圆角 ≈ 22% 边长；符号白色、几何简笔，
   16px 下不糊的判据是线宽 ≥ 边长 15%；
-- 一份 `assets/icon.ico`，内含 256/48/32/16 四档；
-- spec 的 `EXE(...)` 加一行 `icon=os.path.join(SPECPATH, "assets", "icon.ico")`；
-- 生成脚本可整份照抄官方样板仓（Tool_Counter）的 `assets/make_icon.py`，
-  只改 `draw_symbol` 画自己工具的符号（Pillow 仅生成时用，不进产物）；
 - 一条避坑：**白十字放红底上像红十字会徽（受保护标志），别用「+」当符号**。
 
-宿主平台客户端列表里的图标是另一回事（接入契约 §3 的 `icon` 目前是死字段，
-等那侧功能定型），本节只管 exe 自己的图标。
+三步：
+
+**① 生成脚本整份照抄，只改 `draw_symbol`**，在仓根跑一次（Pillow 只在生成时装，
+不进 requirements、不进产物）：
+
+```python
+# examples/minimal/assets/make_icon.py
+"""图标生成——一次出两样：exe 用的 icon.ico（四档）与工具列表用的 icon.png（256×256）。
+
+全家风格：**品牌红圆角底板 + 白色简笔符号**。别的仓整份照抄，只改 ``draw_symbol``
+（画自己工具的符号），然后在仓根::
+
+    pip install pillow          # 只在生成时用；不进 requirements、不进产物
+    python assets/make_icon.py
+
+生成的两份文件入仓；spec 的 EXE(...) 挂 icon.ico，miniprog.toml 的 icon 指向 icon.png。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from PIL import Image, ImageDraw
+
+BRAND = "#db021d"  # msui tokens.css 的 --brand（图标底板正是品牌用途）
+WHITE = "#ffffff"
+SIZE = 256  # 基准画布；ico 的其余档由 LANCZOS 下采样
+ICO_SIZES = [(256, 256), (48, 48), (32, 32), (16, 16)]
+HERE = Path(__file__).resolve().parent
+
+
+def draw_symbol(d: ImageDraw.ImageDraw) -> None:
+    """示例的符号：一扇窗（外框 + 顶栏）。每仓只改这个函数。
+
+    几何简笔、线宽 ≥ 边长 15% 才在 16px 下不糊；别用「+」——白十字放红底上像
+    红十字会徽（受保护标志）。
+    """
+    d.rounded_rectangle([60, 64, 196, 192], radius=18, outline=WHITE, width=24)
+    d.rectangle([60, 64, 196, 104], fill=WHITE)
+
+
+def main() -> None:
+    img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))  # 透明底，圆角外露出背景
+    d = ImageDraw.Draw(img)
+    d.rounded_rectangle([8, 8, SIZE - 8, SIZE - 8], radius=56, fill=BRAND)  # 56/248 ≈ 22%
+    draw_symbol(d)
+    img.save(HERE / "icon.ico", sizes=ICO_SIZES)
+    img.save(HERE / "icon.png", optimize=True)
+    print(f"icon -> {HERE / 'icon.ico'}, {HERE / 'icon.png'}")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+**② 挂上**：spec 的 `EXE(...)` 加一行（完整 spec 见上文「打包」一节），`miniprog.toml`
+写 `icon`：
+
+```python
+# examples/minimal/app.spec 片段
+    icon=os.path.join(SPECPATH, "assets", "icon.ico"),  # assets/make_icon.py 生成
+```
+
+```toml
+# examples/minimal/miniprog.toml 片段
+icon = "assets/icon.png"
+```
+
+**③ 测试里接上检查**：`msui.testing.icon_problems(仓根)` 查 toml 的 `icon`（仓内 PNG、
+256×256、≤ 64 KB）、仓根 `.spec` 的 `EXE(...)` 写了 `icon=`、它指向的 ico 四档齐全；
+回一份问题清单，每条写明缺什么、怎么补。整份照抄：
+
+```python
+# examples/minimal/tests/test_icon_gate.py
+"""图标闸门：exe 图标（ico 四档、spec 挂上）与工具列表图标（toml 的 icon、256×256 PNG）。
+
+整份可照抄；缺什么，失败信息逐条写清楚。
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from msui import testing as gate
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_icons_present_and_valid():
+    problems = gate.icon_problems(REPO_ROOT)
+    assert not problems, "\n".join(problems)
+```
 
 ## 说明文档：生成器与写法（0.12.0 起，可选）
 
@@ -1868,6 +1962,22 @@ class Api:
 生成前用 `--check` 看一遍；缺例子的节会被点名，例如
 `docs/件数.md:12: 「2. 件数怎么算」这一节没有例子`。
 
+## 从 0.12.x 升到 0.13.0
+
+0.13.0 起**每个小程序仓都必须有图标**（exe 用的 ico + 工具列表用的 PNG），msui 提供检查函数
+`msui.testing.icon_problems`。页面和样式没有变化。升级时按下面做：
+
+1. **钉版本几处一起改**：`requirements.txt` 那行 wheel URL 里的两处版本号（路径段 `v0.13.0` +
+   文件名 `msui-0.13.0-…`），加上冒烟里的 `MSUI_PINNED` 常量；
+2. **补图标**，照「图标」一节三步：
+   - 已经有 exe 图标的（Counter、CIPData、包装排产）：把生成脚本换成新版 `make_icon.py`
+     （自己的 `draw_symbol` 原样搬过去），重跑一次补出 `assets/icon.png`；`miniprog.toml`
+     写 `icon = "assets/icon.png"`；
+   - 还没有 exe 图标的（CostCalc、EHS 体检、MUData、PQPR）：先定符号，再整份照做——
+     生成两份图标、spec 的 `EXE(...)` 加 `icon=`、toml 写 `icon`；
+3. **测试里加 `test_icon_gate.py`**（整份照抄）。缺什么它逐条说清楚：toml 没写 icon 或指错、
+   PNG 尺寸不对或超过 64 KB、ico 缺档、spec 没写 `icon=`。
+
 ## 从 0.11.x 升到 0.12.0
 
 0.12.0 新增两样，都是 opt-in：**运行日志区**（`msui.runlog` + `runlog.js` + base.css 的
@@ -1977,7 +2087,7 @@ class Api:
 ```text
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
-   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.12.0/msui-0.12.0-py3-none-any.whl
+   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.13.0/msui-0.13.0-py3-none-any.whl
    另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
    要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
@@ -2086,6 +2196,14 @@ class Api:
     拍板类文档文末写「请你回复」，逐条给选项和推荐；确实不需要例子的节写
     <!-- 无需例子：理由 -->。文档里不写员工姓名和个人路径。「文档」按钮调
     msui.docgen.open_doc(路径, 锚点)。
+21. 图标（必须有）：照 msui README「图标」一节——assets/make_icon.py 整份
+    照抄、只改 draw_symbol（pip install pillow 只在生成时装），一次生成
+    assets/icon.ico（256/48/32/16 四档）和 assets/icon.png（256×256 透明底、
+    ≤ 64 KB），两份都入仓；spec 的 EXE(...) 写
+    icon=os.path.join(SPECPATH, "assets", "icon.ico")；miniprog.toml 写
+    icon = "assets/icon.png"；测试照抄 test_icon_gate.py（调
+    msui.testing.icon_problems）。长相是品牌红圆角底板 + 白色简笔符号，
+    不用「+」当符号。
 ```
 
 ## 发布（维护者）

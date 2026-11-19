@@ -5,7 +5,8 @@
    代码块，标记行之后的内容 == 那个文件的全文——README 里的代码就是从
    examples 抄的，两边一旦漂移当场红；
 2. 覆盖清单钉死：app.py / index.html / skeleton.html / app-layout.html /
-   widgets.html / test_style_gate.py / app.spec 七份都必须被 README 引用（少引一份 = 契约不完整）；
+   widgets.html / test_style_gate.py / app.spec / make_icon.py / test_icon_gate.py
+   九份都必须被 README 引用（少引一份 = 契约不完整）；
 3. 安装行与「给 AI 的转述块」里的 wheel URL 版本号 == pyproject.toml 的
    version——发新版忘了改 README 当场红，也不许残留旧版本的下载 URL；
 4. 示例 app.py 的 MSUI_PINNED（钉版本官方姿势的示范常量）== pyproject 的
@@ -47,6 +48,9 @@ EXPECTED_QUOTED_FILES = {
     "examples/minimal/pages/widgets.html",
     "examples/minimal/tests/test_style_gate.py",
     "examples/minimal/app.spec",
+    # 票 #32 图标：生成脚本与图标闸门
+    "examples/minimal/assets/make_icon.py",
+    "examples/minimal/tests/test_icon_gate.py",
 }
 
 
@@ -106,6 +110,9 @@ EXPECTED_FRAGMENT_MARKERS = (
     "RunLog(",
     "start_run(",
     "def get_log",
+    # 票 #32 图标：spec 挂 icon、toml 写 icon
+    'icon=os.path.join(SPECPATH, "assets", "icon.ico")',
+    'icon = "assets/icon.png"',
 )
 
 
