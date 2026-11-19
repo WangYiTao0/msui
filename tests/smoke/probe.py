@@ -19,6 +19,11 @@
      data-theme 翻转、图标切换、localStorage 写入；正文 user-select 不是 none、
      按钮是 none；另起一份 `run(text_select=False)` 的副本，正文必须是 none；
      再起两份共用临时 storage_dir 的副本：第一份点成深色，第二份开窗仍是深色。
+  ⑤ 票 #29 的运行日志区在真窗口里成立（同在 widgets.html）：记了散行、一次成功
+     运行、一次失败运行、最新一次成功运行之后，最早的组收起、失败组浅红底且展开、
+     最新组展开；长行真的换行、不横滚；正文可选；点折叠后 Python 再记一条 error，
+     日志区自动展开且偏好仍是折叠；再起两份共用 storage_dir 的副本：第一份点折叠，
+     第二份开窗仍折叠。
 
 输出约定：最后一行 ``SMOKE-RESULT {json}``（全部读数），失败清单非空则
 退出码 1；watchdog 超时直接 os._exit(2)。所有 print 均 flush——冻结产物
@@ -38,6 +43,7 @@ from pathlib import Path
 
 import msui
 from msui import resources
+from msui.runlog import RunLog
 from msui.shell import run
 
 TIMEOUT_SECONDS = 120
@@ -59,6 +65,10 @@ TEXT_SELECT_OFF_ENV = "MSUI_TEXT_SELECT_OFF"
 # 角色（click / check），目录由 THEME_STORAGE_ENV 递过去。
 THEME_PERSIST_ENV = "MSUI_THEME_PERSIST"
 THEME_STORAGE_ENV = "MSUI_THEME_STORAGE"
+
+# 票 #29「点折叠后重开仍折叠」：同上的两趟副本模式，角色 click / check。
+RUNLOG_PERSIST_ENV = "MSUI_RUNLOG_PERSIST"
+RUNLOG_STORAGE_ENV = "MSUI_RUNLOG_STORAGE"
 
 # 页面里读 user-select：WebKit 只认带前缀的那个属性，两个都读。
 _USER_SELECT_JS = (
@@ -86,6 +96,36 @@ results: dict[str, object] = {
     "platform": sys.platform,
 }
 failures: list[str] = []
+
+
+# 运行日志缓冲：widgets.html 的日志区按 data-runlog="get_log" 轮询它。
+RUNLOG = RunLog()
+LONG_LINE = (
+    "目标文件被占用，写不进去："
+    "//fileserver/share/归档/2024/01/导出结果_最终版_请勿改名_条目一与条目二合并_sample-0001_20240131.xlsx"
+)
+
+
+def fill_runlog(log: RunLog) -> None:
+    """散行 + 成功运行 + 失败运行 + 最新一次成功运行：三组的默认开合各不相同。"""
+    log.info("程序已启动")
+    log.start_run("读取数据")
+    log.info("读到 6 张表。")
+    log.end_run("ok", "6 张表全部识别成功")
+    log.start_run("导出")
+    log.warn("数量与上一轮相差超过一成。")
+    log.error(LONG_LINE)
+    log.end_run("error", "导出失败：目标文件被占用")
+    log.start_run("重新读取")
+    log.info("读到 6 张表。")
+    log.end_run("ok", "完成")
+
+
+class ProbeApi:
+    """探针的 js_api：只有日志区要的那个方法。"""
+
+    def get_log(self, since: int = 0) -> dict:
+        return RUNLOG.since(since)
 
 
 def check(name: str, ok: bool, detail: object) -> None:
@@ -204,6 +244,61 @@ def theme_persist_main(role: str) -> int:
     return 0
 
 
+def runlog_persist_main(role: str) -> int:
+    """副本模式：带 storage_dir 开窗。click 趟点一下日志区的折叠按钮并读回
+    localStorage；check 趟只读开窗时日志区是不是折叠着。各打一行 RUNLOG-PERSIST。"""
+    seen: list[str] = []
+
+    def on_ready_persist(window) -> None:  # noqa: ANN001
+        try:
+            for _ in range(200):
+                if window.evaluate_js(
+                    "document.readyState === 'complete' && !!document.querySelector('[data-runlog]')"
+                ):
+                    break
+                time.sleep(0.1)
+            if role == "click":
+                seen.append(str(window.evaluate_js(
+                    "(() => { const b = document.querySelector('[data-runlog-toggle]');"
+                    " if (!b) return 'missing'; b.click();"
+                    " return (document.querySelector('[data-runlog-list]').hidden ? 'folded' : 'open')"
+                    "   + ' ' + JSON.stringify(localStorage.getItem('runlog-collapsed')); })()"
+                )))
+                # 写进 localStorage 之后留一口气再关窗：本机实测一次「点完立刻销毁、
+                # 下一趟读不到」的偶发红（复跑不复现），疑似存储还没落盘。
+                time.sleep(0.5)
+            else:
+                seen.append(str(window.evaluate_js(
+                    "(() => { const s = document.querySelector('[data-runlog]');"
+                    " if (!s) return 'missing';"
+                    " return (s.querySelector('[data-runlog-list]').hidden"
+                    "   && s.classList.contains('collapsed')) ? 'folded' : 'open'; })()"
+                )))
+        finally:
+            window.destroy()
+
+    run(
+        page_dir() / "widgets.html",
+        title=f"msui-smoke-probe-runlog-{role}",
+        hidden=True,
+        storage_dir=os.environ[RUNLOG_STORAGE_ENV],
+        single_instance=False,
+        on_ready=on_ready_persist,
+    )
+    print(f"RUNLOG-PERSIST {role} " + (seen[0] if seen else "never-ran"), flush=True)
+    return 0
+
+
+def _runlog_persist_round(role: str, storage: str) -> str:
+    """跑一趟日志区折叠持久化副本，取回它那行读数。"""
+    done = _spawn_self(RUNLOG_PERSIST_ENV, value=role, extra={RUNLOG_STORAGE_ENV: storage})
+    prefix = f"RUNLOG-PERSIST {role} "
+    line = next((ln for ln in done.stdout.splitlines() if ln.startswith(prefix)), "")
+    return line.removeprefix(prefix) or (
+        f"no-line rc={done.returncode} err={done.stderr.strip()[-200:]!r}"
+    )
+
+
 def _theme_persist_round(role: str, storage: str) -> str:
     """跑一趟主题持久化副本，取回它那行读数（取不到回空串）。"""
     done = _spawn_self(THEME_PERSIST_ENV, value=role, extra={THEME_STORAGE_ENV: storage})
@@ -275,6 +370,69 @@ def check_widgets_page(window) -> None:  # noqa: ANN001
         " return once + ' / ' + state(); })()"
     )
     check("theme_toggle", flips == 'dark sun "" / light moon "light"', flips)
+
+
+def check_runlog(window) -> None:  # noqa: ANN001
+    """票 #29：widgets.html 上的运行日志区（页面已由 check_widgets_page 载入）。"""
+    groups_js = (
+        "(() => { const gs = [...document.querySelectorAll('.runlog-run')];"
+        " return gs.map(g => (g.querySelector('.runlog-lines').hidden ? 'closed' : 'open')"
+        "   + ':' + g.querySelector('.st').textContent).join(' '); })()"
+    )
+    groups = ""
+    for _ in range(200):
+        groups = str(window.evaluate_js(groups_js))
+        if groups.count(":") == 3:
+            break
+        time.sleep(0.1)
+    # 最早的成功组收起；失败组默认展开；最新组展开
+    check("runlog_groups", groups == "closed:成功 open:失败 open:成功", groups)
+    token_check(window, "runlog_error_run_bg", ".runlog-run.error", "backgroundColor", "error-bg")
+    token_check(window, "runlog_error_line_bg", ".runlog-line.error", "backgroundColor", "error-bg")
+    token_check(window, "runlog_error_level_color", ".runlog-line.error .lv", "color", "error")
+    head = window.evaluate_js(
+        "(() => { const h = document.querySelector('.runlog-run.error .runlog-head');"
+        " return h ? [...h.children].map(c => c.textContent).slice(1).join(' · ') : 'missing'; })()"
+    )
+    check("runlog_error_head", head == "失败 · 导出 · 导出失败：目标文件被占用", head)
+    wrapped = window.evaluate_js(
+        "(() => { const tx = [...document.querySelectorAll('.runlog-line .tx')]"
+        f"   .find(e => e.textContent === {json.dumps(LONG_LINE)});"
+        " const list = document.querySelector('[data-runlog-list]');"
+        " if (!tx || !list) return 'missing';"
+        " const cs = getComputedStyle(tx);"
+        " if (cs.whiteSpace !== 'pre-wrap') return 'white-space ' + cs.whiteSpace;"
+        " if (tx.getBoundingClientRect().height < parseFloat(cs.lineHeight) * 1.5) return 'one-line';"
+        " if (list.scrollWidth > list.clientWidth) return 'hscroll';"
+        " return 'wraps'; })()"
+    )
+    check("runlog_long_line_wraps", wrapped == "wraps", wrapped)
+    selectable = window.evaluate_js(
+        "(() => { const tx = document.querySelector('.runlog-line .tx');"
+        " if (!tx) return 'missing'; const cs = getComputedStyle(tx);"
+        " return cs.userSelect || cs.webkitUserSelect; })()"
+    )
+    check("runlog_text_selectable", selectable not in ("none", "missing"), selectable)
+    # 折叠后 Python 再记一条 error：日志区自动展开，偏好仍是折叠
+    folded = window.evaluate_js(
+        "(() => { const b = document.querySelector('[data-runlog-toggle]');"
+        " if (!b) return 'missing'; b.click();"
+        " return document.querySelector('[data-runlog-list]').hidden ? 'folded' : 'open'; })()"
+    )
+    check("runlog_fold", folded == "folded", folded)
+    RUNLOG.error("折叠着来了一条失败")
+    reopened = ""
+    for _ in range(100):
+        reopened = str(window.evaluate_js(
+            "(() => { const s = document.querySelector('[data-runlog]');"
+            " if (!s) return 'missing';"
+            " return (s.querySelector('[data-runlog-list]').hidden ? 'folded' : 'open') + ' '"
+            "   + JSON.stringify(localStorage.getItem('runlog-collapsed')); })()"
+        ))
+        if reopened.startswith("open"):
+            break
+        time.sleep(0.1)
+    check("runlog_error_unfolds_without_saving", reopened == 'open "1"', reopened)
 
 
 def second_instance_main() -> int:
@@ -377,6 +535,8 @@ def on_ready(window) -> None:  # noqa: ANN001 - pywebview Window，探针不引�
 
         # 待验条款④：票 #27 的部件、主题切换、文字可选（第二页）。
         check_widgets_page(window)
+        # 待验条款⑤：票 #29 的运行日志区（同一页）。
+        check_runlog(window)
 
         # text_select=False 的副本：正文必须不可选（pywebview 注入的那条生效）。
         try:
@@ -403,6 +563,16 @@ def on_ready(window) -> None:  # noqa: ANN001 - pywebview Window，探针不引�
             check("theme_persists_reopen", second == "dark", second)
         except subprocess.TimeoutExpired:
             check("theme_persists_reopen", False, "副本超时未退出")
+
+        # 日志区折叠重开后保持：第一趟点折叠、第二趟开窗仍折叠。
+        try:
+            with tempfile.TemporaryDirectory(prefix="msui-runlog-") as storage:
+                first = _runlog_persist_round("click", storage)
+                second = _runlog_persist_round("check", storage)
+            check("runlog_fold_persists_click", first == 'folded "1"', first)
+            check("runlog_fold_persists_reopen", second == "folded", second)
+        except subprocess.TimeoutExpired:
+            check("runlog_fold_persists_reopen", False, "副本超时未退出")
     except Exception:  # noqa: BLE001 - 探针要把任何炸法都带出窗口报出来
         failures.append("on_ready 崩了：\n" + traceback.format_exc())
     finally:
@@ -416,6 +586,8 @@ def main() -> int:
         return text_select_off_main()
     if os.environ.get(THEME_PERSIST_ENV) in ("click", "check"):
         return theme_persist_main(os.environ[THEME_PERSIST_ENV])
+    if os.environ.get(RUNLOG_PERSIST_ENV) in ("click", "check"):
+        return runlog_persist_main(os.environ[RUNLOG_PERSIST_ENV])
 
     watchdog = threading.Timer(
         TIMEOUT_SECONDS,
@@ -470,8 +642,10 @@ def main() -> int:
 
     # 真开窗（隐藏，全程不上屏），后台线程里读数并销毁。守卫开着——本进程
     # 是第一实例，必须照常开窗；副本由 on_ready 里的双开实测负责。
+    fill_runlog(RUNLOG)
     run(
         pd / "index.html",
+        js_api=ProbeApi(),
         title="msui-smoke-probe",
         hidden=True,
         single_instance=SINGLE_INSTANCE_ID,
