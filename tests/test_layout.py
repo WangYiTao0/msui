@@ -873,7 +873,7 @@ def test_app_focus_ring_is_visible_and_token_coloured():
 # 状态点 .dot 的四个状态，名字与 .pill / .notice 同一套。
 DOT_STATES = ("ok", "warn", "info", "error")
 
-# 运行日志区组头的状态字：运行中 info、成功 ok、失败 error（已停止用裸 .st 的 muted）。
+# 运行日志区组头的状态字：运行中 info、成功 ok、失败 error（已停止用裸 .st 的 text-dim）。
 RUNLOG_STATUS_COLOURS = (("running", "info"), ("ok", "ok"), ("error", "error"))
 
 WIDGET_PAIRS = (
@@ -974,7 +974,8 @@ WIDGET_PAIRS = (
     (".runlog-list", "border", "win"),
     (".runlog-list", "border", "card"),
     (".runlog-head .tm, .runlog-line .tm", "muted", "win"),
-    (".runlog-head .st", "muted", "win"),
+    # 已停止（裸 .st）用次要色：它是结论，不是「看得见就行」的提示（审查修复）
+    (".runlog-head .st", "text-dim", "win"),
     *((f".runlog-head .st.{s}", t, "win") for s, t in RUNLOG_STATUS_COLOURS),
     (".runlog-head .nm", "text", "win"),
     (".runlog-head .rs", "text-dim", "win"),

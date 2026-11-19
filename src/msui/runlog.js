@@ -20,11 +20,15 @@
  *
  * 两层折叠：
  *   - 整区：「折叠 / 展开」按钮，状态存 localStorage 的 `runlog-collapsed` 键
- *     （'1' 折叠，'' 展开；没存过 = 展开）。折叠着时来了 warn / error 自动展开，
- *     这次展开不写回——下次打开照样折叠。记得住的前提同 theme.js：run() 给了 storage_dir。
+ *     （'1' 折叠，'' 展开；没存过 = 展开）。折叠着时**新到**了 warn / error 行、或有
+ *     运行以 error 结束，自动展开，这次展开不写回——下次打开照样折叠。开窗首轮取回
+ *     的历史不算「新到」，不会把用户选的折叠展开。记得住的前提同 theme.js：run() 给了
+ *     storage_dir。
  *   - 每次运行一组：组头「时间 · 状态 · 名称 · 结果」，点组头开合。失败组、最新一组
  *     默认展开，其余收起；用户亲手开合过的组以用户为准，新数据不再改它。
  * 停在底部才跟着滚到最新；往上翻着看时不把人拽下去。
+ * 页面上最多留 MAX_LINES 行，超了删最早的；组里的行删空了整组删。行数写
+ * 「N 行」，删过之后写「N 行，显示最近 M 行」。
  * 「清空显示」只清页面上的显示和行数，不动 Python 里的缓冲、不删日志文件。
  */
 (function () {
@@ -33,6 +37,7 @@
   var LEVEL_TEXT = { info: "信息", warn: "告警", error: "失败" };
   var STATUS_TEXT = { running: "运行中", ok: "成功", error: "失败", stopped: "已停止" };
   var INTERVAL_MS = 500;
+  var MAX_LINES = 2000;
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -73,6 +78,8 @@
     var groups = {};    // id → {node, head, body}（只管眼下页面上的）
     var userSet = {};   // id → true/false：用户亲手开合过的组
     var latest = null;  // 最新一组的 id
+    var rows = [];      // 页面上的行，按先后：{node, run}
+    var primed = false; // 首轮取回过了：之后到的才算「新到」
 
     function setCollapsed(on, save) {
       collapsed = on;
@@ -101,12 +108,13 @@
       group.node.className = "runlog-run" + (run.status === "error" ? " error" : "") + (open ? " open" : "");
       group.body.hidden = !open;
       group.head.setAttribute("aria-expanded", String(open));
-      var cells = group.head.children;
-      cells[0].textContent = run.start;
-      cells[1].textContent = STATUS_TEXT[run.status] || run.status;
-      cells[1].className = "st " + run.status;
-      cells[2].textContent = run.name;
-      cells[3].textContent = run.status === "running" ? "" : run.result;
+      var head = group.head;
+      head.querySelector(".tm").textContent = run.start;
+      var st = head.querySelector(".st");
+      st.textContent = STATUS_TEXT[run.status] || run.status;
+      st.className = "st " + run.status;
+      head.querySelector(".nm").textContent = run.name;
+      head.querySelector(".rs").textContent = run.status === "running" ? "" : run.result;
     }
 
     function ensureGroup(id) {
@@ -163,32 +171,56 @@
       }
       for (i = 0; i < lines.length; i++) items.push({ seq: lines[i].seq, line: lines[i] });
       items.sort(function (a, b) { return a.seq - b.seq; });
+      var fresh = primed;  // 首轮（哪怕取回的是空）之后到的才算新到
+      primed = true;
       if (!items.length && !newRuns.length) return;
 
       var atBottom = list.scrollTop + list.clientHeight >= list.scrollHeight - 4;
       var alarm = false;
+      for (i = 0; i < newRuns.length; i++) if (newRuns[i].status === "error") alarm = true;
       for (i = 0; i < items.length; i++) {
         var item = items[i];
         if (item.line === undefined) { ensureGroup(item.run); continue; }
         var line = item.line;
         if (line.level === "warn" || line.level === "error") alarm = true;
         var row = lineNode(line);
-        if (line.run !== null && line.run !== undefined && runs[line.run]) ensureGroup(line.run).body.appendChild(row);
+        var owner = line.run !== null && line.run !== undefined && runs[line.run] ? line.run : null;
+        if (owner !== null) ensureGroup(owner).body.appendChild(row);
         else list.appendChild(row);
+        rows.push({ node: row, run: owner });
       }
+      trim();
       for (i = 0; i < newRuns.length; i++) paintGroup(newRuns[i].id);
       shown += lines.length;
-      if (count) count.textContent = shown ? shown + " 行" : "";
-      // 折叠着来了告警 / 失败：自动展开，不写回偏好
-      if (collapsed && alarm) setCollapsed(false, false);
+      if (count) {
+        count.textContent = !shown ? "" : shown > rows.length
+          ? shown + " 行，显示最近 " + rows.length + " 行" : shown + " 行";
+      }
+      // 折叠着新到了告警 / 失败：自动展开，不写回偏好。首轮取回的是开窗前的历史，不算。
+      if (collapsed && alarm && fresh) setCollapsed(false, false);
       else if (atBottom && !collapsed) list.scrollTop = list.scrollHeight;
+    }
+
+    // 超过上限删最早的行；组里的行删空了，整组连同它的开合记录一起删。
+    function trim() {
+      while (rows.length > MAX_LINES) {
+        var gone = rows.shift();
+        gone.node.remove();
+        var id = gone.run;
+        if (id !== null && groups[id] && !groups[id].body.firstChild) {
+          groups[id].node.remove();
+          delete groups[id];
+          delete userSet[id];
+        }
+      }
     }
 
     function poll() {
       var api = window.pywebview && window.pywebview.api;
       if (busy || !api || typeof api[method] !== "function") return;
       busy = true;
-      Promise.resolve(api[method](last))
+      // 包进 new Promise：api 方法同步抛错时也走 catch，不会让 busy 卡在 true
+      new Promise(function (resolve) { resolve(api[method](last)); })
         .then(function (reply) {
           var got = unwrap(reply);
           if (!got) return;
@@ -205,6 +237,7 @@
         list.textContent = "";
         groups = {};
         userSet = {};
+        rows = [];
         latest = null;
         shown = 0;
         if (count) count.textContent = "";
@@ -215,7 +248,7 @@
         var api = window.pywebview && window.pywebview.api;
         var name = folder.getAttribute("data-runlog-folder") || "open_log_folder";
         if (api && typeof api[name] === "function") {
-          Promise.resolve(api[name]()).catch(function () { /* 打不开就算了，不打扰 */ });
+          new Promise(function (resolve) { resolve(api[name]()); }).catch(function () { /* 打不开就算了，不打扰 */ });
         }
       });
     }

@@ -741,7 +741,7 @@ button.switch[aria-checked="true"]::after {
 .runlog-head .tm, .runlog-line .tm {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--muted);
 }
-.runlog-head .st { font-weight: 600; color: var(--muted); }
+.runlog-head .st { font-weight: 600; color: var(--text-dim); }
 .runlog-head .st.running { color: var(--info); }
 .runlog-head .st.ok { color: var(--ok); }
 .runlog-head .st.error { color: var(--error); }

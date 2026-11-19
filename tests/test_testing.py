@@ -20,6 +20,7 @@ from msui import testing as msui_testing
 from msui.resources import (
     ASSET_NAMES,
     BASE_CSS_NAME,
+    RUNLOG_JS_NAME,
     THEME_JS_NAME,
     TOKENS_CSS_NAME,
     TOKENS_LIGHT_CSS_NAME,
@@ -608,7 +609,7 @@ def test_scan_skips_the_landed_copies_by_default(tmp_path: Path):
         TOKENS_LIGHT_CSS_NAME,
         BASE_CSS_NAME,
         THEME_JS_NAME,
-        "runlog.js",
+        RUNLOG_JS_NAME,
         "override.css",
     }
     # 由 ASSET_NAMES 派生：新增落地资产时允许清单自动跟上，不必散改

@@ -22,8 +22,11 @@
   ⑤ 票 #29 的运行日志区在真窗口里成立（同在 widgets.html）：记了散行、一次成功
      运行、一次失败运行、最新一次成功运行之后，最早的组收起、失败组浅红底且展开、
      最新组展开；长行真的换行、不横滚；正文可选；点折叠后 Python 再记一条 error，
-     日志区自动展开且偏好仍是折叠；再起两份共用 storage_dir 的副本：第一份点折叠，
-     第二份开窗仍折叠。
+     日志区自动展开且偏好仍是折叠；再折叠、一次运行以失败结束（期间没有 error
+     行）也自动展开；灌 2100 行后页面只留最近 2000 行、删空的组整组删、计数写
+     「N 行，显示最近 2000 行」；再起两份共用 storage_dir 的副本：第一份点折叠，
+     第二份开窗前预先记好 warn 与失败运行——开窗读到这些历史仍折叠（只有开窗之后
+     新到的才算）。
 
 输出约定：最后一行 ``SMOKE-RESULT {json}``（全部读数），失败清单非空则
 退出码 1；watchdog 超时直接 os._exit(2)。所有 print 均 flush——冻结产物
@@ -128,6 +131,16 @@ class ProbeApi:
         return RUNLOG.since(since)
 
 
+# 页面日志区最多留的行数（runlog.js 的 MAX_LINES）。
+PAGE_MAX_LINES = 2000
+
+
+def settle_storage() -> None:
+    """localStorage 写完留一口气再关窗：本机实测过一次「点完立刻销毁、下一趟读不到」
+    的偶发红（复跑不复现），疑似存储还没落盘。主题与日志区两个持久化副本共用。"""
+    time.sleep(0.5)
+
+
 def check(name: str, ok: bool, detail: object) -> None:
     results[name] = detail
     if not ok:
@@ -225,6 +238,7 @@ def theme_persist_main(role: str) -> int:
                     " return (document.documentElement.dataset.theme || 'dark') + ' '"
                     "   + JSON.stringify(localStorage.getItem('theme')); })()"
                 )))
+                settle_storage()
             else:
                 seen.append(str(window.evaluate_js(
                     "document.documentElement.dataset.theme || 'dark'"
@@ -264,21 +278,34 @@ def runlog_persist_main(role: str) -> int:
                     " return (document.querySelector('[data-runlog-list]').hidden ? 'folded' : 'open')"
                     "   + ' ' + JSON.stringify(localStorage.getItem('runlog-collapsed')); })()"
                 )))
-                # 写进 localStorage 之后留一口气再关窗：本机实测一次「点完立刻销毁、
-                # 下一趟读不到」的偶发红（复跑不复现），疑似存储还没落盘。
-                time.sleep(0.5)
+                settle_storage()
             else:
+                # 等首轮 since(0) 落到页面上（行数出现了），再读折叠态：历史里的
+                # warn / error 不该把用户选的「折叠」展开。
+                for _ in range(100):
+                    if window.evaluate_js(
+                        "(document.querySelector('[data-runlog-count]') || {}).textContent"
+                    ):
+                        break
+                    time.sleep(0.1)
                 seen.append(str(window.evaluate_js(
                     "(() => { const s = document.querySelector('[data-runlog]');"
                     " if (!s) return 'missing';"
-                    " return (s.querySelector('[data-runlog-list]').hidden"
-                    "   && s.classList.contains('collapsed')) ? 'folded' : 'open'; })()"
+                    " const n = s.querySelector('[data-runlog-count]').textContent;"
+                    " return ((s.querySelector('[data-runlog-list]').hidden"
+                    "   && s.classList.contains('collapsed')) ? 'folded' : 'open') + ' ' + n; })()"
                 )))
         finally:
             window.destroy()
 
+    if role == "check":
+        RUNLOG.warn("开窗之前就有的告警")
+        RUNLOG.start_run("开窗之前的运行")
+        RUNLOG.error("开窗之前就有的失败")
+        RUNLOG.end_run("error", "开窗之前就失败了")
     run(
         page_dir() / "widgets.html",
+        js_api=ProbeApi(),
         title=f"msui-smoke-probe-runlog-{role}",
         hidden=True,
         storage_dir=os.environ[RUNLOG_STORAGE_ENV],
@@ -434,6 +461,47 @@ def check_runlog(window) -> None:  # noqa: ANN001
         time.sleep(0.1)
     check("runlog_error_unfolds_without_saving", reopened == 'open "1"', reopened)
 
+    # 再折叠：一次运行以失败结束、期间没有 error 行，也算告警，自动展开
+    window.evaluate_js("document.querySelector('[data-runlog-toggle]').click()")
+    RUNLOG.start_run("静默失败")
+    RUNLOG.info("这一趟没有 error 行")
+    RUNLOG.end_run("error", "结局是失败")
+    run_alarm = ""
+    for _ in range(100):
+        run_alarm = str(window.evaluate_js(
+            "(() => { const l = document.querySelector('[data-runlog-list]');"
+            " return l ? (l.hidden ? 'folded' : 'open') : 'missing'; })()"
+        ))
+        if run_alarm == "open":
+            break
+        time.sleep(0.1)
+    check("runlog_error_run_unfolds", run_alarm == "open", run_alarm)
+
+    # 页面上限：灌 2100 行散行，只留最近 2000 行；之前的组全被挤空、整组删掉
+    for n in range(2100):
+        RUNLOG.info(f"灌行 {n}")
+    capped = ""
+    for _ in range(150):
+        capped = str(window.evaluate_js(
+            "(() => { const s = document.querySelector('[data-runlog]');"
+            " if (!s) return 'missing';"
+            " return [s.querySelectorAll('.runlog-line').length,"
+            "   s.querySelectorAll('.runlog-run').length,"
+            "   s.querySelector('[data-runlog-count]').textContent].join(' | '); })()"
+        ))
+        if "灌行" in str(window.evaluate_js(
+            "(() => { const t = [...document.querySelectorAll('.runlog-line .tx')].pop();"
+            " return t ? t.textContent : ''; })()"
+        )) and capped.startswith(f"{PAGE_MAX_LINES} "):
+            break
+        time.sleep(0.1)
+    total = len(RUNLOG.since(0)["lines"])
+    check(
+        "runlog_page_cap",
+        capped == f"{PAGE_MAX_LINES} | 0 | {total} 行，显示最近 {PAGE_MAX_LINES} 行",
+        capped,
+    )
+
 
 def second_instance_main() -> int:
     """副本模式：同 id 再 run 一次，把守卫的判定打成一行标记。
@@ -570,7 +638,7 @@ def on_ready(window) -> None:  # noqa: ANN001 - pywebview Window，探针不引�
                 first = _runlog_persist_round("click", storage)
                 second = _runlog_persist_round("check", storage)
             check("runlog_fold_persists_click", first == 'folded "1"', first)
-            check("runlog_fold_persists_reopen", second == "folded", second)
+            check("runlog_fold_persists_reopen", second == "folded 2 行", second)
         except subprocess.TimeoutExpired:
             check("runlog_fold_persists_reopen", False, "副本超时未退出")
     except Exception:  # noqa: BLE001 - 探针要把任何炸法都带出窗口报出来
