@@ -1,0 +1,8 @@
+# 行尾约定（WangYiTao0/my_home_repo#37，模板照 Tool_CIPData#8）：
+# 文本一律以 LF 入库、LF 检出，不依赖各台电脑的 core.autocrlf（Windows 电脑上它是 false）。
+# 必须放最前面：gitattributes 后写的规则覆盖先写的，下面的例外才能盖过它。
+* text=auto eol=lf
+
+# 二进制文件，绝不当文本处理（不转行尾、不做文本 diff）。
+*.png binary
+*.ico binary
