@@ -675,18 +675,14 @@ def test_every_app_layout_rule_hangs_under_the_body_app_switch():
     """不挂 class="app" 的页面一条都命中不到——「小窗一个像素不变」的文本层证明。
 
     先自证扫描没坏（已知的 body.app 规则、@media 里嵌着的规则都扫得到），
-    再逐条核对：选择器里提到应用式专属类、或 [hidden] / :focus-visible 这类
-    全局改写的，必须以 body.app 开头。
+    再逐条核对：选择器里提到应用式专属类、或 [hidden] 这类全局改写的，必须以
+    body.app 开头。全局焦点环 `:focus-visible` 0.14.0 起有意放到全局（小窗也要
+    看得见 Tab 走到了哪），不在这条里，由 test_focus_ring_is_global_and_token_coloured 盯着。
     """
     selectors = all_selectors()
     assert "body.app" in selectors, "扫描没扫到 body.app——扫描本身坏了，它的绿不作数"
     assert "progress::-webkit-progress-bar" in selectors, "@media 里嵌着的规则没扫到"
-    # :focus-visible 只抓「全局」那种（前面不贴着类名 / 标签名）：`.step:focus-visible`
-    # 这类挂在部件自己类名上的焦点环（票 #27）命中不到旧元素，不算漏。
-    pattern = re.compile(
-        r"\.(?:" + "|".join(APP_ONLY_CLASSES) + r")(?![\w-])|\[hidden\]"
-        r"|(?<![\w\])-]):focus-visible"
-    )
+    pattern = re.compile(r"\.(?:" + "|".join(APP_ONLY_CLASSES) + r")(?![\w-])|\[hidden\]")
     leaks = [s for s in selectors if pattern.search(s) and not is_app_scoped(s)]
     assert not leaks, f"这些规则没挂在 body.app 下，会漏进小工具窗：{leaks}"
 
@@ -859,9 +855,13 @@ def test_app_hidden_really_hides_even_over_author_display():
     assert "display: none !important" in rule("body.app [hidden]")
 
 
-def test_app_focus_ring_is_visible_and_token_coloured():
-    ring = rule("body.app :focus-visible")
+def test_focus_ring_is_global_and_token_coloured():
+    """0.14.0 起焦点环不分版式：小窗里的输入框原来只靠 --border → --border-hover
+    换边（深色 1.26:1、浅色 1.16:1），够不到焦点可见的 3:1。"""
+    ring = rule(":focus-visible")
     assert re.search(r"outline: 2px solid var\(--info\)", ring)
+    assert "outline-offset: 2px" in ring
+    assert "body.app :focus-visible" not in all_selectors(), "旧的只挂 body.app 的那条该删了"
 
 
 # 新部件画出来的「前景 × 底」组合。每一条：规则里真用了那个前景 token（防止
@@ -889,8 +889,8 @@ WIDGET_PAIRS = (
     ("body.app .status", "muted", "win"),
     ("body.app .status", "border", "win"),
     ("body.app .rail", "border", "win"),
-    ("body.app :focus-visible", "info", "win"),
-    ("body.app :focus-visible", "info", "card"),
+    (":focus-visible", "info", "win"),
+    (":focus-visible", "info", "card"),
     # ---- 票 #22：列表页 / 设置页部件 ----
     (".grid", "border", "card"),
     (".grid", "border", "win"),
@@ -1022,7 +1022,7 @@ def test_new_widget_pairs_are_registered_for_both_themes(selector: str, fg: str,
 def test_fade_in_rises_and_fades_through_its_own_keyframes():
     """关键帧带 msui- 前缀（与 msui-progress-loop 同一惯例），不跟页面自己的撞名。"""
     fade = rule(".fade-in")
-    assert re.search(r"animation: msui-card-in \d+ms", fade)
+    assert "animation: msui-card-in var(--motion-enter) var(--ease-enter)" in fade
     assert "both" in fade, "fill-mode both：延迟期间停在起始帧，不先闪一下终态"
     assert "var(--i, 0)" in fade, "错峰靠元素上的 --i 序号，缺省 0"
     frames = re.search(r"@keyframes msui-card-in\s*\{(.*?)\n\}", BASE, re.DOTALL)
@@ -1245,7 +1245,7 @@ def test_icon_button_is_a_square_that_centres_its_svg():
     assert "width: 16px" in svg and "height: 16px" in svg
 
 
-@pytest.mark.parametrize("cls", [".chip", ".icon", ".switch", ".dot"])
+@pytest.mark.parametrize("cls", [".chip", ".icon", ".switch", ".dot", ".field-error"])
 def test_toggleable_widgets_never_declare_display(cls: str):
     """这四样是页面会拿 hidden 收放的（清除叉有字才出现、开关跟着权限出没、
     状态点按状态出没……）。小窗里没有 `body.app [hidden]` 那条兜底，作者层的
@@ -1390,7 +1390,7 @@ def test_clickable_step_is_reachable_by_tab_with_the_app_focus_ring():
     （小窗里没有 body.app 那条全局焦点环，这里自己带）。"""
     assert "cursor: pointer" in rule(".step[tabindex]")
     assert "border-color: var(--border-hover)" in rule(".step[tabindex]:hover")
-    assert rule(".step:focus-visible").strip() == rule("body.app :focus-visible").strip()
+    assert rule(".step:focus-visible").strip() == rule(":focus-visible").strip()
 
 
 def test_kpis_is_a_four_column_grid_that_drops_to_two_in_a_narrow_window():
@@ -1559,3 +1559,102 @@ def test_runlog_parts_folded_by_hidden_never_declare_display(cls: str):
 def test_old_log_rule_is_untouched_by_the_runlog_widget():
     """旧 .log 不改：新部件全是 runlog- 前缀的新类名，没有一条落在 .log 上。"""
     assert not [s for s in all_selectors() if "runlog" in s and re.search(r"\.log(?![\w-])", s)]
+
+
+# ---------------------------------------------------------------------------
+# 0.14.0：可访问性与动效 token（UI UX Pro Max 评估补的六条 + 两个新外观）
+# ---------------------------------------------------------------------------
+
+TOKENS_TEXT = tokens_css_path().read_text(encoding="utf-8")
+
+MOTION_TOKENS = ("motion-fast", "motion-enter", "motion-stagger", "motion-loop", "ease-enter")
+
+
+@pytest.mark.parametrize("name", MOTION_TOKENS + ("measure",))
+def test_new_quantity_tokens_exist_and_are_whitelisted(name: str):
+    assert name in TOKENS, f"tokens.css 里没有 --{name}"
+    assert name in NON_HEX_TOKENS
+
+
+def _css_without_comments(css: str) -> str:
+    return re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+
+
+def test_base_css_never_writes_a_literal_duration():
+    """时长只经 --motion-* 取用：改节奏只改 tokens.css 一处（与「不手写色值」同一个道理）。"""
+    literals = re.findall(r"(?<![\w.-])\d*\.?\d+m?s\b", _css_without_comments(BASE))
+    assert literals == [], f"base.css 里写了字面时长：{literals}"
+
+
+def test_the_duration_scan_is_not_blind():
+    assert re.findall(r"(?<![\w.-])\d*\.?\d+m?s\b", "a { transition: color 150ms; animation: x 1.1s }") == ["150ms", "1.1s"]
+
+
+def test_search_box_draws_the_ring_on_the_box_not_on_the_bare_input():
+    """搜索框是「图标 + 无边框输入框」拼成的一块：环画在外框上，里面的输入框不再画一圈。"""
+    assert "outline: 0" in rule(".search input:focus-visible")
+    ring = rule(".search:has(input:focus-visible)")
+    assert "outline: 2px solid var(--info)" in ring
+
+
+def test_dark_tokens_declare_the_dark_color_scheme():
+    """不写的话 WebView2 按浅色画原生控件（下拉列表、日期框、复选框）。浅色那份已有。"""
+    root = re.search(r"(?m)^:root\s*\{([^}]*)\}", TOKENS_TEXT)
+    assert root and "color-scheme: dark" in root.group(1)
+
+
+def test_wide_pane_paragraphs_keep_a_readable_measure():
+    """小窗靠 --content-max 限住行长；应用式主区能拉到上千 px，说明段要自己限。提示条不限。"""
+    assert "max-width: var(--measure)" in rule(":where(body.app .pane) p:not(.notice)")
+
+
+INVALID_SELECTOR = (
+    'input[aria-invalid="true"], textarea[aria-invalid="true"], '
+    'select[aria-invalid="true"], .input[aria-invalid="true"]'
+)
+
+
+def test_invalid_field_is_outlined_in_error_and_wins_over_focus():
+    assert "border-color: var(--error)" in rule(INVALID_SELECTOR)
+    assert rule_pos(INVALID_SELECTOR) > rule_pos(
+        "input:focus, textarea:focus, select:focus, .input:focus-within"
+    ), "写在聚焦规则前面的话，聚焦时红框会被换回 --border-hover"
+
+
+def test_field_error_text_is_small_error_coloured_and_lines_up_under_the_input():
+    assert "color: var(--error)" in rule(".field-error")
+    under = rule(".field > .field-error")
+    assert "flex: 1 0 100%" in under
+    assert "padding-left: calc(var(--field-label) + var(--space-3))" in under
+
+
+BUSY = 'button[aria-busy="true"], .btn[aria-busy="true"]'
+SPINNER = 'button[aria-busy="true"]:not(.icon):not(.switch)::before, .btn[aria-busy="true"]::before'
+
+
+def test_busy_button_ignores_pointer_and_shows_a_token_coloured_spinner():
+    assert "cursor: progress" in rule(BUSY)
+    assert "pointer-events: none" in rule(BUSY)
+    spin = rule(SPINNER)
+    assert "border: 2px solid currentColor" in spin
+    assert "animation: msui-spin var(--motion-loop) linear infinite" in spin
+
+
+def test_busy_spinner_is_stopped_by_reduced_motion():
+    """::before 由静止段的通配符 `*::before` 罩住——这里只证明那条通配符还在。"""
+    assert "*, *::before, *::after" in reduced_motion_block()
+
+
+WIDGET_PAIRS_0_14 = (
+    (INVALID_SELECTOR, "error", "card"),
+    (".field-error", "error", "card"),
+    (".field-error", "error", "win"),
+)
+
+
+@pytest.mark.parametrize(("selector", "fg", "bg"), WIDGET_PAIRS_0_14)
+def test_new_error_colours_are_registered_pairs(selector, fg, bg):
+    assert f"var(--{fg})" in rule(selector)
+    from msui.testing import BASE_TOKEN_PAIRS
+
+    assert any(p.foreground == fg and p.background == bg for p in BASE_TOKEN_PAIRS), (fg, bg)

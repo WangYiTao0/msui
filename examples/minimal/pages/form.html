@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<!--
+  表单页的可访问性写法（0.14.0 起）：字段错误、必填、忙碌按钮、未保存提醒、回车与输入法。
+  全是 base.css 现成的样子，不写一行样式；校验照旧在 Python 侧做，页面只收集和显示。
+  - 必填：标签后面写「（必填）」，输入框写 required（读屏念「必需」）；
+  - 字段错误：出错的输入框写 aria-invalid="true"（红框），紧跟一行 .field-error 写原因，
+    输入框用 aria-describedby 指向它；改对了（input 事件里）就把两样都收掉，不等下次保存；
+  - 汇总错误写进 role="alert" 的 .notice.error，成功写进 role="status" 的 .notice.ok；
+  - 忙碌：调 Python 期间给按钮写 aria-busy="true"（转圈、点不动），应答回来去掉；
+  - 未保存：改过没存时标题旁的 .pill.warn 亮「有未保存的改动」，「放弃改动」先用 <dialog> 确认；
+    关窗前的提醒由 Python 侧（pywebview 的 closing 事件）问页面 hasUnsaved()；
+  - 回车：输入框里按回车 = 点保存，但先判断输入法（中文输入法按回车是确认候选词）。
+  校验前先去掉首尾空格（Python 侧 .strip()），别因为多敲一个空格就报错。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>应用名</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+</head>
+<body>
+  <h1>导出设置 <span class="pill warn" id="dirty" hidden>有未保存的改动</span></h1>
+  <p>改完点保存；没保存就关窗会先问你。</p>
+  <div class="card">
+    <div class="field">
+      <label for="prefix">文件名前缀（必填）</label>
+      <input id="prefix" required aria-describedby="prefix-err">
+      <p class="field-error" id="prefix-err" hidden></p>
+    </div>
+    <div class="field">
+      <label for="out">输出目录</label>
+      <input id="out" aria-describedby="out-err">
+      <button type="button">浏览</button>
+      <p class="field-error" id="out-err" hidden></p>
+    </div>
+  </div>
+  <p class="notice error" id="save-error" role="alert" hidden></p>
+  <p class="notice ok" id="saved" role="status" hidden>已保存。</p>
+  <div class="actions">
+    <button class="primary" type="button" id="save">保存</button>
+    <button type="button" id="discard">放弃改动…</button>
+  </div>
+  <dialog id="confirm-discard">
+    <h2>放弃没保存的改动吗？</h2>
+    <p>输入框回到上次保存的内容，刚才改的都不要了。</p>
+    <div class="actions">
+      <button type="button" id="discard-no">取消</button>
+      <button class="primary" type="button" id="discard-yes">放弃改动</button>
+    </div>
+  </dialog>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const FIELDS = { prefix: "prefix-err", out: "out-err" };
+    let saved = { prefix: "", out: "" };
+
+    // 未保存：和上次保存的值比，不一样就亮「有未保存的改动」。
+    function hasUnsaved() {
+      return Object.keys(FIELDS).some((id) => $(id).value !== saved[id]);
+    }
+    function paintDirty() { $("dirty").hidden = !hasUnsaved(); }
+
+    // 字段错误：红框 + 下面一行原因；message 为空就收掉。
+    function fieldError(id, message) {
+      const input = $(id), slot = $(FIELDS[id]);
+      input.setAttribute("aria-invalid", message ? "true" : "false");
+      slot.textContent = message || "";
+      slot.hidden = !message;
+    }
+
+    for (const id of Object.keys(FIELDS)) {
+      $(id).addEventListener("input", () => { fieldError(id, ""); paintDirty(); });
+      // 回车 = 保存；输入法还在确认候选词时不算。
+      $(id).addEventListener("keydown", (event) => {
+        if (event.isComposing || event.keyCode === 229) return;
+        if (event.key === "Enter") $("save").click();
+      });
+    }
+
+    $("save").addEventListener("click", async () => {
+      const button = $("save");
+      button.setAttribute("aria-busy", "true");
+      let reply;
+      try {
+        reply = await window.pywebview.api.save_settings({ prefix: $("prefix").value, out: $("out").value });
+      } finally {
+        button.removeAttribute("aria-busy");
+      }
+      if (!reply || reply.busy) return;
+      const errors = reply.data.errors || {};
+      for (const id of Object.keys(FIELDS)) fieldError(id, errors[id]);
+      const failed = Object.keys(errors).length > 0;
+      $("save-error").hidden = !failed;
+      $("save-error").textContent = failed ? "没保存：有 " + Object.keys(errors).length + " 项要改，见输入框下面的红字。" : "";
+      $("saved").hidden = failed;
+      if (!failed) { saved = { prefix: $("prefix").value, out: $("out").value }; paintDirty(); }
+    });
+
+    const dialog = $("confirm-discard");
+    $("discard").addEventListener("click", () => { if (hasUnsaved()) dialog.showModal(); });
+    $("discard-no").addEventListener("click", () => dialog.close());
+    $("discard-yes").addEventListener("click", () => {
+      dialog.close();
+      for (const id of Object.keys(FIELDS)) { $(id).value = saved[id]; fieldError(id, ""); }
+      paintDirty();
+    });
+  </script>
+</body>
+</html>

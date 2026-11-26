@@ -15,7 +15,7 @@ requirements 里写一行钉版本的 wheel URL，无需任何凭据；**升级 
 两处版本号**：
 
 ```
-msui @ https://github.com/WangYiTao0/msui/releases/download/v0.13.0/msui-0.13.0-py3-none-any.whl
+msui @ https://github.com/WangYiTao0/msui/releases/download/v0.14.0/msui-0.14.0-py3-none-any.whl
 ```
 
 另外两个工具的去处按宿主平台的接入契约分工：**`pyinstaller` 也进
@@ -64,7 +64,7 @@ from msui.testing import SmokeDriver
 # 本仓钉死的 msui 版本，与 requirements 里 wheel URL 的版本号一致，升级
 # msui 时两处一起改。冒烟据此断言横幅——钉死常量证明「产物带的确实是钉的
 # 这一版」；改读 importlib.metadata 只是回显装了哪版、永远绿，证明不了钉住。
-MSUI_PINNED = "0.13.0"
+MSUI_PINNED = "0.14.0"
 
 
 class Api:
@@ -657,7 +657,7 @@ if __name__ == "__main__":
       <button>浏览</button>
     </div>
     <progress max="100" value="0"></progress>
-    <p class="notice error" id="tip" hidden>校验没过的原因写这里。</p>
+    <p class="notice error" id="tip" role="alert" hidden>校验没过的原因写这里。</p>
   </div>
   <div class="card">
     <pre class="log" id="log"></pre>
@@ -765,13 +765,13 @@ if __name__ == "__main__":
        成功时收起，别自己写 display。 -->
   <div class="card">
     <h2>提示区</h2>
-    <p class="notice error">校验没过：源目录与输出目录不能重叠。这样填的话搬迁会
+    <p class="notice error" role="alert">校验没过：源目录与输出目录不能重叠。这样填的话搬迁会
       把刚写出去的文件当成新的输入再读一遍，第二轮之后目录里到底还剩什么谁也说
       不清；而且这个动作不可逆，出了事只能从备份恢复。请把输出目录挪到源目录之
       外，再点一次开始。 <button id="retry">重试</button></p>
-    <p class="notice warn">共享盘上有 3 个文件正被别人占用，这一轮会跳过它们。</p>
-    <p class="notice info">正在连共享盘，第一次连接可能要等十几秒。</p>
-    <p class="notice ok" id="tip-ok" hidden>校验通过，可以开始了。（这一条起初带着
+    <p class="notice warn" role="status">共享盘上有 3 个文件正被别人占用，这一轮会跳过它们。</p>
+    <p class="notice info" role="status">正在连共享盘，第一次连接可能要等十几秒。</p>
+    <p class="notice ok" id="tip-ok" role="status" hidden>校验通过，可以开始了。（这一条起初带着
       hidden 属性，冒烟会把它打开：藏起来的提示条不许显示出来。）</p>
   </div>
   <!-- 定高滚动日志区：<pre class="log">。等宽（--font-mono 档）、自己滚、最高
@@ -920,8 +920,8 @@ if __name__ == "__main__":
 校验没过、跑完了这类**内联提示**挂 `.notice` 加一个状态修饰：
 
 ```html
-<p class="notice error">校验没过：源目录与输出目录不能重叠……</p>
-<p class="notice ok" id="tip" hidden>校验通过，可以开始了。</p>
+<p class="notice error" role="alert">校验没过：源目录与输出目录不能重叠……</p>
+<p class="notice ok" id="tip" role="status" hidden>校验通过，可以开始了。</p>
 ```
 
 - 四个状态 `error` / `warn` / `info` / `ok`：底走对应的半透明晕染
@@ -930,7 +930,10 @@ if __name__ == "__main__":
   显示、成功时收起。别给 `.notice` 加 `display`：那会盖掉 `[hidden]`，藏起来
   的提示条会照样显示出来；
 - 错误条里可以直接跟一个行内 `<button>`（典型是「重试」），它会跟着条子一起
-  染红，不用另写样式。
+  染红，不用另写样式；
+- **写 `role`**（0.14.0 起有检查）：`error` 写 `role="alert"`，其余写
+  `role="status"`。提示条是 JS 改字、取消 `hidden` 才出现的，不写 role 读屏
+  软件不念。理由与检查见下面「可访问性」一节。
 
 跑批日志用 `<pre class="log">`：等宽字体（`--font-mono` 档）、自己滚、最高
 40vh，**长行不折行、横向滚动**——日志里全是长文件路径，折了眼睛没法顺着扫。
@@ -1092,6 +1095,7 @@ if __name__ == "__main__":
       if (step) pick(step);
     });
     steps.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229) return; // 输入法确认候选词的回车不算
       if (event.key !== "Enter" && event.key !== " ") return;
       if (!event.target.classList.contains("step")) return;
       event.preventDefault();
@@ -1458,6 +1462,169 @@ base.css，行为在 msui 落下来的 `runlog.js`——**页面不写轮询和�
 
 旧的 `<pre class="log">` 原样保留（不换行、不折叠），没换新部件的页面一个像素不变。
 
+### 可访问性：焦点、播报、表单错误、忙碌、未保存、回车（0.14.0 起）
+
+这几条是 base.css 现成的样子加几行页面写法。能做成检查的，由 §5 的
+`a11y_problems` 盯着；剩下的照这里写。
+
+**base.css 已经替你做了的**（不用写任何东西）：
+
+- **键盘焦点环不分版式**：Tab 走到的控件有一圈 2px `--info` 环。原来只有
+  `body.app` 下才有；小窗里的输入框聚焦时只是边框换一档（对比度 1.26:1），
+  看不出来。搜索框 `.search` 的环画在外框上；
+- **动效节奏走 token**：`--motion-fast`（150ms，hover / 按下）、`--motion-enter`
+  + `--ease-enter`（240ms，`.fade-in` 进场）、`--motion-stagger`（40ms，错峰）、
+  `--motion-loop`（1.1s，不定态进度条、忙碌圆圈）。base.css 里不写字面 ms，
+  「减少动态效果」下照旧全部停掉；
+- **应用式主区的说明段限行长**：`body.app .pane` 里的 `<p>`（提示条除外）
+  最宽 `--measure`（72ch，13px 下约 40 个汉字），窗口拉宽时不会一行几百字；
+- **深色下原生控件按深色画**：tokens.css 写了 `color-scheme: dark`（浅色那份
+  写 `light`），下拉列表、日期框、复选框跟着主题走。
+
+**页面要写的**，有检查盯着（§5 的 `test_a11y_gate.py`）：
+
+| 写法 | 为什么 | 检查报什么 |
+|---|---|---|
+| 提示条 `.notice.error` 写 `role="alert"`，其余 `.notice` 写 `role="status"` | 它是 JS 改字 / 取消 `hidden` 才出现的，不写 role 读屏不念 | 文件:行号 + 该写哪个 role |
+| 图标按钮 `button.icon` 写 `aria-label`（写明动作），里面的 `<svg>` 写 `aria-hidden="true"` | 读屏念动作，不念一串路径；`title` 只在悬停时出现，不算名称 | 缺名称 / svg 没隐藏 |
+| 回车处理先判断输入法：`if (event.isComposing \|\| event.keyCode === 229) return;` | 中文输入法里按回车是「确认候选词」，keydown 的 key 照样是 `"Enter"`；不判断，用户敲个中文路径按回车选字就提前保存了 | 比较 key 与 `"Enter"` 那一行附近（往上 6 行、往下 2 行）没有 `isComposing` |
+
+检查只看静态文本：JS 运行时才拼出来的提示条和按钮看不到，那部分靠 review。
+
+**页面要写的**，没有检查（照下面的示例页写）：
+
+- **必填**：标签后写「（必填）」，输入框写 `required`；
+- **字段错误写在字段旁边**：Python 侧按字段回错误（`{"prefix": "不能含斜杠"}`），
+  页面给出错的输入框写 `aria-invalid="true"`（变红框），紧跟一行
+  `<p class="field-error">` 写原因、输入框 `aria-describedby` 指向它；在 `.field`
+  里它自动独占一行、和输入框左对齐。**改对了就收掉**：在 `input` 事件里把
+  `aria-invalid` 和那行字一起去掉，不等下次点保存。几项都错时，顶上再放一条
+  `role="alert"` 的 `.notice.error` 说「有 N 项要改」；
+- **校验前先去首尾空格**（Python 侧 `.strip()`），别因为多敲一个空格报错；
+- **调 Python 期间按钮写 `aria-busy="true"`**：按钮前出现一个转圈、点不动、读屏
+  念「忙」，应答回来（`finally` 里）去掉。不用 `disabled`：它会把键盘焦点弄丢。
+  桥的忙碌信封照旧兜底（连点丢弃）；`aria-busy` 是让人看得见「点上了」；
+- **未保存的改动**：改过没存时亮一颗 `.pill.warn`「有未保存的改动」；「放弃改动」
+  先用 `<dialog>` 确认；关窗时 Python 侧（pywebview 的 `closing` 事件）调页面的
+  `hasUnsaved()`，为真就问一句再关。页面之间切换用 `hidden` 收放、DOM 不销毁
+  的话，切页不会丢改动，不用拦；
+- **过滤后 0 条也要有空态**：搜索或筛选后表格没有行时，出一行
+  `<tr class="empty"><td colspan="N">没有符合的记录</td></tr>`，并给「清除筛选」
+  按钮；别只留一个空表头。
+
+```html
+<!-- examples/minimal/pages/form.html -->
+<!DOCTYPE html>
+<!--
+  表单页的可访问性写法（0.14.0 起）：字段错误、必填、忙碌按钮、未保存提醒、回车与输入法。
+  全是 base.css 现成的样子，不写一行样式；校验照旧在 Python 侧做，页面只收集和显示。
+  - 必填：标签后面写「（必填）」，输入框写 required（读屏念「必需」）；
+  - 字段错误：出错的输入框写 aria-invalid="true"（红框），紧跟一行 .field-error 写原因，
+    输入框用 aria-describedby 指向它；改对了（input 事件里）就把两样都收掉，不等下次保存；
+  - 汇总错误写进 role="alert" 的 .notice.error，成功写进 role="status" 的 .notice.ok；
+  - 忙碌：调 Python 期间给按钮写 aria-busy="true"（转圈、点不动），应答回来去掉；
+  - 未保存：改过没存时标题旁的 .pill.warn 亮「有未保存的改动」，「放弃改动」先用 <dialog> 确认；
+    关窗前的提醒由 Python 侧（pywebview 的 closing 事件）问页面 hasUnsaved()；
+  - 回车：输入框里按回车 = 点保存，但先判断输入法（中文输入法按回车是确认候选词）。
+  校验前先去掉首尾空格（Python 侧 .strip()），别因为多敲一个空格就报错。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>应用名</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="base.css">
+</head>
+<body>
+  <h1>导出设置 <span class="pill warn" id="dirty" hidden>有未保存的改动</span></h1>
+  <p>改完点保存；没保存就关窗会先问你。</p>
+  <div class="card">
+    <div class="field">
+      <label for="prefix">文件名前缀（必填）</label>
+      <input id="prefix" required aria-describedby="prefix-err">
+      <p class="field-error" id="prefix-err" hidden></p>
+    </div>
+    <div class="field">
+      <label for="out">输出目录</label>
+      <input id="out" aria-describedby="out-err">
+      <button type="button">浏览</button>
+      <p class="field-error" id="out-err" hidden></p>
+    </div>
+  </div>
+  <p class="notice error" id="save-error" role="alert" hidden></p>
+  <p class="notice ok" id="saved" role="status" hidden>已保存。</p>
+  <div class="actions">
+    <button class="primary" type="button" id="save">保存</button>
+    <button type="button" id="discard">放弃改动…</button>
+  </div>
+  <dialog id="confirm-discard">
+    <h2>放弃没保存的改动吗？</h2>
+    <p>输入框回到上次保存的内容，刚才改的都不要了。</p>
+    <div class="actions">
+      <button type="button" id="discard-no">取消</button>
+      <button class="primary" type="button" id="discard-yes">放弃改动</button>
+    </div>
+  </dialog>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const FIELDS = { prefix: "prefix-err", out: "out-err" };
+    let saved = { prefix: "", out: "" };
+
+    // 未保存：和上次保存的值比，不一样就亮「有未保存的改动」。
+    function hasUnsaved() {
+      return Object.keys(FIELDS).some((id) => $(id).value !== saved[id]);
+    }
+    function paintDirty() { $("dirty").hidden = !hasUnsaved(); }
+
+    // 字段错误：红框 + 下面一行原因；message 为空就收掉。
+    function fieldError(id, message) {
+      const input = $(id), slot = $(FIELDS[id]);
+      input.setAttribute("aria-invalid", message ? "true" : "false");
+      slot.textContent = message || "";
+      slot.hidden = !message;
+    }
+
+    for (const id of Object.keys(FIELDS)) {
+      $(id).addEventListener("input", () => { fieldError(id, ""); paintDirty(); });
+      // 回车 = 保存；输入法还在确认候选词时不算。
+      $(id).addEventListener("keydown", (event) => {
+        if (event.isComposing || event.keyCode === 229) return;
+        if (event.key === "Enter") $("save").click();
+      });
+    }
+
+    $("save").addEventListener("click", async () => {
+      const button = $("save");
+      button.setAttribute("aria-busy", "true");
+      let reply;
+      try {
+        reply = await window.pywebview.api.save_settings({ prefix: $("prefix").value, out: $("out").value });
+      } finally {
+        button.removeAttribute("aria-busy");
+      }
+      if (!reply || reply.busy) return;
+      const errors = reply.data.errors || {};
+      for (const id of Object.keys(FIELDS)) fieldError(id, errors[id]);
+      const failed = Object.keys(errors).length > 0;
+      $("save-error").hidden = !failed;
+      $("save-error").textContent = failed ? "没保存：有 " + Object.keys(errors).length + " 项要改，见输入框下面的红字。" : "";
+      $("saved").hidden = failed;
+      if (!failed) { saved = { prefix: $("prefix").value, out: $("out").value }; paintDirty(); }
+    });
+
+    const dialog = $("confirm-discard");
+    $("discard").addEventListener("click", () => { if (hasUnsaved()) dialog.showModal(); });
+    $("discard-no").addEventListener("click", () => dialog.close());
+    $("discard-yes").addEventListener("click", () => {
+      dialog.close();
+      for (const id of Object.keys(FIELDS)) { $(id).value = saved[id]; fieldError(id, ""); }
+      paintDirty();
+    });
+  </script>
+</body>
+</html>
+```
+
 ## 4. override.css（默认不用）
 
 默认零配置、不建这个文件。真要换色（比如另一套品牌色）时：
@@ -1606,6 +1773,27 @@ def test_own_css_never_redefines_base_selectors():
     # 扫 pages/ 下自己的 .css（含 layout.css）与 html 内联 <style>
     offenders = gate.scan_base_redefinitions(PAGES)
     assert not offenders, gate.format_base_redefinitions(offenders)
+```
+
+可访问性闸门（0.14.0 起）另放一份，扫 `pages/` 下自己的 `.html` / `.js`：提示条
+写了 role、图标按钮有名称、回车判断了输入法（规则见 §3「可访问性」一节）：
+
+```python
+# examples/minimal/tests/test_a11y_gate.py
+"""可访问性闸门：提示条 role、图标按钮名称、回车判断输入法。整份可照抄，零件来自 msui.testing。"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from msui import testing as gate
+
+PAGES = Path(__file__).resolve().parent.parent / "pages"
+
+
+def test_a11y_gate():
+    # 扫 pages/ 下自己的 .html / .js（含内联 <script>），msui 落下的资产副本不扫
+    problems = gate.a11y_problems(PAGES)
+    assert not problems, gate.format_a11y_problems(problems)
 ```
 
 ## 打包成冻结产物（PyInstaller）
@@ -1962,6 +2150,25 @@ class Api:
 生成前用 `--check` 看一遍；缺例子的节会被点名，例如
 `docs/件数.md:12: 「2. 件数怎么算」这一节没有例子`。
 
+## 从 0.13.x 升到 0.14.0
+
+0.14.0 补的是可访问性：一个新检查函数、几样 base.css 现成的样子、一节写法规范。
+**接口不变，升级本身不会让测试变红**；把新检查抄进测试后，按它报的位置改页面。
+
+1. **钉版本几处一起改**：`requirements.txt` 那行 wheel URL 里的两处版本号（路径段
+   `v0.14.0` + 文件名 `msui-0.14.0-…`），加上冒烟里的 `MSUI_PINNED` 常量；
+2. **加可访问性闸门**：照抄 §5 的 `tests/test_a11y_gate.py`，跑一遍，按报的
+   `文件:行号` 改——通常是给 `.notice` 补 `role`、给 `button.icon` 补
+   `aria-label` 和 svg 的 `aria-hidden`、给回车处理补一行输入法判断；
+3. **看得见的变化**（不用改代码）：
+   - 小窗版式里 Tab 或点进输入框，会出现一圈蓝色焦点环（原来只有 `body.app` 有）。
+     自己的 `layout.css` 里如果写过全局 `:focus-visible`，**删掉**——它现在是
+     base.css 的选择器，留着会被「不重定义 base.css」那条闸门报出来；
+   - 深色主题下的下拉列表、日期框、复选框改按深色画；
+   - 应用式主区里的说明段最宽 72ch；
+4. **可选**：表单页照 §3「可访问性」的示例页改成字段级错误（`aria-invalid` +
+   `.field-error`）、忙碌按钮（`aria-busy`）、未保存提醒。
+
 ## 从 0.12.x 升到 0.13.0
 
 0.13.0 起**每个小程序仓都必须有图标**（exe 用的 ico + 工具列表用的 PNG），msui 提供检查函数
@@ -2087,7 +2294,7 @@ class Api:
 ```text
 本项目界面使用 msui（共享 UI 运行时与样式，pywebview + WebView2）。约定如下：
 1. 安装：requirements 里写一行钉版本 wheel URL（升级 = 只改版本号）：
-   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.13.0/msui-0.13.0-py3-none-any.whl
+   msui @ https://github.com/WangYiTao0/msui/releases/download/v0.14.0/msui-0.14.0-py3-none-any.whl
    另加一行 pyinstaller（宿主平台接入契约要求它进 requirements，CI 打包
    要用）；pytest 不进 requirements，CI 测试步内现装。
 2. 页面（HTML/CSS/JS）放本仓 pages/ 目录。启动三步：page_dir() 定位页面目录
@@ -2112,7 +2319,8 @@ class Api:
    localStorage 的 theme 键，没存过按浅色；跨次记住需要 run(storage_dir=…)。
 6. 测试加三条样式闸门（照抄 msui README 的 test_style_gate.py）：
    contrast_failures 对比度（theme_colors 深色、浅色各一遍）+ scan_stray_hex 防游离色值 +
-   scan_base_redefinitions 不重定义 base.css 已有选择器。
+   scan_base_redefinitions 不重定义 base.css 已有选择器；另加一条可访问性闸门
+   （照抄 test_a11y_gate.py，调 a11y_problems，见第 22 条）。
 7. PyInstaller spec 里对 msui 零资源配置（包自带 hook 收齐样式与元数据），
    datas 只写自己的 ("pages", "pages")。
 8. 版本核对：copy_assets 落下的 css 第一行是 /* msui X.Y.Z */。冒烟里定义
@@ -2146,7 +2354,8 @@ class Api:
     showModal() 弹（遮罩、居中、卡片容器、宽度上限全自带；里面的按钮行挂
     .actions，不另造一套），**禁止用 JS 的 confirm()/alert()/prompt()——它们
     阻塞 webview 的消息循环**；内联提示挂 .notice + 一个状态
-    （error/warn/info/ok），显示/隐藏用 hidden 属性，不要给它写 display；
+    （error/warn/info/ok），error 写 role="alert"、其余写 role="status"，
+    显示/隐藏用 hidden 属性，不要给它写 display；
     跑批日志用 <pre class="log">（等宽、自己滚、长行不折行横向滚动），要占
     满剩余高度就覆写 max-height。
 15. 宽表格程序（左栏参数 + 右边宽表）用应用式版式：给 body 挂 class="app"
@@ -2204,6 +2413,18 @@ class Api:
     icon = "assets/icon.png"；测试照抄 test_icon_gate.py（调
     msui.testing.icon_problems）。长相是品牌红圆角底板 + 白色简笔符号，
     不用「+」当符号。
+22. 可访问性（照 msui README §3「可访问性」一节；测试照抄 test_a11y_gate.py，
+    调 msui.testing.a11y_problems）：提示条 .notice.error 写 role="alert"、其余
+    .notice 写 role="status"；图标按钮写 aria-label、里面的 svg 写
+    aria-hidden="true"；回车处理第一行写
+    if (event.isComposing || event.keyCode === 229) return;（中文输入法按回车是
+    确认候选词）。表单：必填标签写「（必填）」+ required；出错的输入框写
+    aria-invalid="true"，紧跟 <p class="field-error"> 写原因、aria-describedby
+    指过去，改对了在 input 事件里收掉；调 Python 期间按钮写 aria-busy="true"
+    （不用 disabled）；改过没存亮 .pill.warn「有未保存的改动」，放弃先用 dialog
+    确认，关窗前问页面 hasUnsaved()；过滤后 0 条出一行 tr.empty。焦点环、动效
+    节奏（--motion-*）、主区段落行宽（--measure）、深色原生控件都由 base.css
+    / tokens.css 做好，不自己写 :focus-visible、不写字面 ms。
 ```
 
 ## 发布（维护者）

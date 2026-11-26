@@ -21,6 +21,9 @@
  */
 
 :root {
+  /* 原生控件（下拉列表、日期框、复选框、滚动条）按深色画；浅色那份在 tokens-light.css 里写 light。 */
+  color-scheme: dark;
+
   /* ---- 底色 ---- */
   --bg: #0b0b0d; /* 舞台/桌面背景，窗口外的那一圈 */
   --win: #141417; /* 窗口本体底色 */
@@ -143,4 +146,21 @@
    * 尾部按钮」的 .field 时，这个宽度会让尾部按钮折到下一行（.field 自己的折行
    * 行为，不溢出）；要一行排开、或左栏内容更宽/更窄的页面覆写这一个变量。 */
   --rail-width: 300px;
+
+  /* ---- 说明段行长（非色值 token，已登记白名单） ----
+   * 应用式主区里 p 的 max-width（base.css）。72ch 在 13px 下约 40 个汉字。 */
+  --measure: 72ch;
+
+  /* ---- 动效节奏（非色值 token，已登记白名单；0.14.0 起） ----
+   * base.css 里的时长只经这几档取用，不写字面 ms——改节奏只改这一处。
+   *   --motion-fast     hover / 按下 / 换边这类即时反馈
+   *   --motion-enter    卡片进场（.fade-in），配 --ease-enter（快出慢收）
+   *   --motion-stagger  进场错峰的每档间隔（style="--i: 序号"）
+   *   --motion-loop     持续动画一圈（不定态进度条、忙碌圆圈）
+   * 「减少动态效果」下全部停掉，由 base.css 末尾的静止段负责，与这里无关。 */
+  --motion-fast: 150ms;
+  --motion-enter: 240ms;
+  --motion-stagger: 40ms;
+  --motion-loop: 1.1s;
+  --ease-enter: cubic-bezier(.16, 1, .3, 1);
 }

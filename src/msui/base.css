@@ -70,8 +70,8 @@ button, .btn {
   cursor: pointer;
   border: 1px solid var(--border-hover); background: transparent;
   color: var(--text-dim);
-  transition: color 150ms ease-out, background 150ms ease-out,
-              transform 150ms ease-out;
+  transition: color var(--motion-fast) ease-out, background var(--motion-fast) ease-out,
+              transform var(--motion-fast) ease-out;
 }
 button:hover, .btn:hover { color: var(--text); background: var(--wash); }
 button:active, .btn:active { transform: scale(.97); }
@@ -81,6 +81,18 @@ button:disabled, .btn:disabled {
 button:disabled:hover, .btn:disabled:hover {
   color: var(--text-dim); background: transparent;
 }
+/* ---- 忙碌态（0.14.0 起）：调 Python 期间给触发按钮写 aria-busy="true" ----
+   点不动（pointer-events: none，连点不会再发请求）、光标转圈、文字前加一个
+   currentColor 的小圆圈在转；读屏念「忙」。应答回来把属性去掉。不用 disabled：
+   disabled 会把键盘焦点丢掉，用户 Tab 回来时找不到刚才那颗按钮。
+   图标按钮与开关不加圆圈（它们定宽、::after 另有用处），只换光标。 */
+button[aria-busy="true"], .btn[aria-busy="true"] { cursor: progress; pointer-events: none; }
+button[aria-busy="true"]:not(.icon):not(.switch)::before, .btn[aria-busy="true"]::before {
+  content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px;
+  vertical-align: -1px; border: 2px solid currentColor; border-right-color: transparent;
+  border-radius: 50%; animation: msui-spin var(--motion-loop) linear infinite;
+}
+@keyframes msui-spin { to { transform: rotate(360deg); } }
 /* 主按钮：品牌色底，一个界面里同时最多一个。文字走 --on-brand（品牌色上的
    文字色），不借道 --text：浅色主题下 --text 是黑的，借道就成了红底黑字。 */
 button.primary, .btn.primary {
@@ -113,12 +125,30 @@ input, textarea, select, .input {
   padding: 7px 12px;
   background: var(--card); border: 1px solid var(--border); border-radius: 8px;
   outline: 0;
-  transition: border-color 150ms ease-out;
+  transition: border-color var(--motion-fast) ease-out;
 }
 input:focus, textarea:focus, select:focus, .input:focus-within {
   border-color: var(--border-hover);
 }
 input::placeholder, textarea::placeholder { color: var(--muted); }
+
+/* ---- 键盘焦点环：不分版式（0.14.0 起） ----
+   Tab 走到哪得看得见。原来只有 body.app 下有这一圈；小窗里的输入框写了
+   outline: 0，聚焦只把边框从 --border 换成 --border-hover——深色 1.26:1、浅色
+   1.16:1，够不到「焦点可见」的 3:1。--info 对窗底与卡片底都过文字档 4.5，作
+   焦点环（控件档 3.0）有余量。:focus-visible 的特异性 (0,1,0) 压过上面
+   input 那条的 outline: 0（0,0,1），所以不用改那条。 */
+:focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
+
+/* ---- 字段错误态（0.14.0 起）：页面给出错的输入框写 aria-invalid="true" ----
+   描边换成 --error（对卡片底过文字档），读屏同时念「无效」。必须写在上面
+   聚焦那条之后：两条特异性相同，靠源码顺序——写在前面的话，聚焦时红框会被
+   换回 --border-hover。改对后把属性去掉（或写 "false"）就复原。错误原因写在
+   紧跟着的 .field-error 里，并用 aria-describedby 指过去。 */
+input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="true"], .input[aria-invalid="true"] {
+  border-color: var(--error);
+}
+.field-error { font-size: 12px; line-height: 1.5; color: var(--error); }
 
 /* ---- 表单行：标签 + 弹性输入框 + 尾部按钮，一行排开 ----
    `<div class="field"><label>…</label><input><button>…</button></div>`
@@ -152,6 +182,8 @@ input::placeholder, textarea::placeholder { color: var(--muted); }
 }
 .field > button, .field > .btn { flex: 0 0 auto; align-self: stretch; }
 .field > * + * { margin-top: 0; }
+/* 字段下面那行错误小字：独占一行，左边缘对齐输入框（标签列宽 + 列间距）。 */
+.field > .field-error { flex: 1 0 100%; padding-left: calc(var(--field-label) + var(--space-3)); }
 
 /* ---- 进度条：裸 <progress> 就有长相 ----
    轨道 --track、进度 --brand、圆角与按钮同一档（7px）、默认占满内容列宽。
@@ -189,14 +221,14 @@ progress::-webkit-progress-value { background: var(--brand); border-radius: 7px;
 progress:not([value]) {
   background-image: linear-gradient(90deg, var(--track), var(--brand), var(--track));
   background-size: 40% 100%; background-repeat: no-repeat;
-  animation: msui-progress-loop 1.1s ease-in-out infinite;
+  animation: msui-progress-loop var(--motion-loop) ease-in-out infinite;
 }
 /* 与上面那条内容相同、故意分开写：把伪元素选择器并进同一个选择器列表的话，
    哪个引擎不认 ::-webkit-progress-bar，整条规则（含宿主那半边）就一起被丢掉。 */
 progress:not([value])::-webkit-progress-bar {
   background-image: linear-gradient(90deg, var(--track), var(--brand), var(--track));
   background-size: 40% 100%; background-repeat: no-repeat;
-  animation: msui-progress-loop 1.1s ease-in-out infinite;
+  animation: msui-progress-loop var(--motion-loop) ease-in-out infinite;
 }
 progress:not([value])::-webkit-progress-value { background: none; }
 @keyframes msui-progress-loop {
@@ -225,8 +257,8 @@ tbody tr:hover { background: var(--card-hover); }
 .card {
   border: 1px solid var(--border); background: var(--card); border-radius: 10px;
   padding: var(--space-4);
-  transition: transform 150ms ease-out, border-color 150ms ease-out,
-              background 150ms ease-out;
+  transition: transform var(--motion-fast) ease-out, border-color var(--motion-fast) ease-out,
+              background var(--motion-fast) ease-out;
 }
 .card.clickable { cursor: pointer; }
 .card.clickable:hover {
@@ -408,8 +440,8 @@ dialog > * + * { margin-top: var(--space-3); }
    「减少动态效果」下由文件末尾静止段的通配符基线停掉——停掉之后元素直接以
    终态出现（起始帧的 opacity 0 只活在动画里，元素本身是不透明的）。 */
 .fade-in {
-  animation: msui-card-in 240ms cubic-bezier(.16, 1, .3, 1) both;
-  animation-delay: calc(var(--i, 0) * 40ms);
+  animation: msui-card-in var(--motion-enter) var(--ease-enter) both;
+  animation-delay: calc(var(--i, 0) * var(--motion-stagger));
 }
 @keyframes msui-card-in {
   from { opacity: 0; transform: translateY(6px); }
@@ -498,7 +530,7 @@ td.num, th.num { text-align: right; }
   min-width: 240px; padding: 5px 10px;
   background: var(--card); border: 1px solid var(--border); border-radius: 8px;
   color: var(--muted);
-  transition: border-color 150ms ease-out;
+  transition: border-color var(--motion-fast) ease-out;
 }
 .search:focus-within { border-color: var(--border-hover); }
 .search input {
@@ -506,6 +538,9 @@ td.num, th.num { text-align: right; }
   border: 0; background: none; color: var(--text);
 }
 .search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+/* 焦点环画在外框上：里面是无边框的输入框，环画在它身上会贴着图标、只圈半块。 */
+.search input:focus-visible { outline: 0; }
+.search:has(input:focus-visible) { outline: 2px solid var(--info); outline-offset: 2px; }
 
 /* ---- 图标按钮 button.icon：只放一个图标的正方形按钮 ----
    `<button class="icon" aria-label="上移"><svg viewBox="0 0 16 16" fill="none"
@@ -554,13 +589,13 @@ button.switch {
   position: relative; flex-shrink: 0; vertical-align: middle;
   width: 34px; height: 20px; padding: 0; border-radius: 999px;
   border: 1px solid var(--border); background: var(--track);
-  transition: background 150ms ease-out, border-color 150ms ease-out;
+  transition: background var(--motion-fast) ease-out, border-color var(--motion-fast) ease-out;
 }
 button.switch::after {
   content: ""; position: absolute; top: 2px; left: 2px;
   width: 14px; height: 14px; border-radius: 999px;
   background: var(--text-dim);
-  transition: transform 150ms ease-out, background 150ms ease-out;
+  transition: transform var(--motion-fast) ease-out, background var(--motion-fast) ease-out;
 }
 button.switch:hover { background: var(--track); border-color: var(--border-hover); }
 button.switch[aria-checked="true"] { background: var(--brand); border-color: var(--brand); }
@@ -623,7 +658,7 @@ button.switch[aria-checked="true"]::after {
 .step {
   position: relative; padding: 10px 12px; border-radius: 10px;
   border: 1px solid transparent;
-  transition: background 150ms ease-out, border-color 150ms ease-out;
+  transition: background var(--motion-fast) ease-out, border-color var(--motion-fast) ease-out;
 }
 .step .head { display: flex; align-items: center; gap: var(--space-2); }
 .step .num { display: grid; place-items: center; }
@@ -632,7 +667,7 @@ button.switch[aria-checked="true"]::after {
   width: 22px; height: 22px; border-radius: 999px;
   border: 2px solid var(--border-hover); background: var(--win);
   font-size: 11px; font-weight: 700; font-style: normal; color: var(--text-dim);
-  transition: background 150ms ease-out, border-color 150ms ease-out;
+  transition: background var(--motion-fast) ease-out, border-color var(--motion-fast) ease-out;
 }
 .step.cur { background: var(--card); border-color: var(--border); }
 .step.cur .num i { border-color: var(--brand); color: var(--text); }
@@ -786,9 +821,6 @@ body.app > * + * { margin-top: 0; }
    的 `[hidden] { display: none }`——藏起来的块照样摆着。这里钉回来。只挂在
    body.app 下：小窗的约定仍是「别给要收放的东西写 display」（见 .notice）。 */
 body.app [hidden] { display: none !important; }
-/* 键盘焦点环：控件多的页面靠 Tab 走，得看得见走到了哪。--info 对窗底与卡片底
-   都过文字档 4.5，焦点环（控件档 3.0）有余量。 */
-body.app :focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
 
 /* 顶栏：`<header class="top"><h1>程序名</h1><div class="seg">…</div>
    <span class="grow"></span><span class="pill">…</span></header>`
@@ -835,6 +867,10 @@ body.app .pane {
    和它的说明段都被拉开一整档。归零后靠源码顺序（写在 `* { margin: 0 }` 之后）
    生效，`h1 + p` 与 `.card > * + *` 照常压过它。 */
 :where(body.app .pane) > * + * { margin-top: var(--space-5); }
+/* 说明段的行长（0.14.0 起）：小窗靠 --content-max 限住，主区能拉到上千 px，
+   一行几百个字读到行尾就找不回下一行开头。--measure 档（72ch）在 13px 下约 40
+   个汉字；提示条不限（它要和上下的卡片同宽）。 */
+:where(body.app .pane) p:not(.notice) { max-width: var(--measure); }
 
 /* ---- 窄窗（< 900px）：左栏退到上面 ----
    定宽左栏在窄窗里会把主区挤到只剩一条，改成上下排：.cols 竖排，左栏的右边线
