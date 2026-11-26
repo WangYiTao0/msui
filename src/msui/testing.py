@@ -754,8 +754,16 @@ class _A11yHtmlChecker(HTMLParser):
             self._script_line = None
 
     def close(self) -> None:
+        # <script> 没闭合：剩下的正文照样扫。收尾时把它交不交给 handle_data，各补丁
+        # 版本不一样（3.12.10 不交、更新的版本交），所以先记下没处理的原始文本自己补。
+        pending, line = self.rawdata, self.getpos()[0]
+        delivered = len(self._script_parts)
         super().close()
-        if self._script_line is not None:  # <script> 没闭合：剩下的正文照样扫
+        if self._script_line is not None:
+            if pending and len(self._script_parts) == delivered:
+                if not self._script_parts:
+                    self._script_line = line
+                self._script_parts.append(pending)
             self.handle_endtag("script")
 
     def handle_data(self, data: str) -> None:
