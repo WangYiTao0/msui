@@ -633,9 +633,12 @@ def format_base_redefinitions(offenders: Mapping[Path, list[str]]) -> str:
 #      不算——它只在悬停时出现、读屏也不保证念），里面的 <svg> 写
 #      aria-hidden="true"；
 #   3. 回车处理判断输入法——中文输入法里按回车是「确认候选词」，keydown 的
-#      key 照样是 "Enter"。比较 key 与 "Enter" 的那一行，往上 6 行、往下 2 行内
-#      要出现 isComposing。这是按行距的近似：守卫写在很远的地方也算没写。
-# 只看静态文本：JS 运行时才拼出来的提示条 / 按钮看不到，那属于 code review。
+#      key 照样是 "Enter"。比较 key 与 "Enter"（或 keyCode / which 与 13）的那一
+#      行，往上 6 行、往下 2 行内要出现 isComposing。这是按行距的近似：守卫写在
+#      很远的地方也算没写；整行是 // 注释的不算。
+# 只看静态文本，认不出的写法会漏：JS 运行时才拼出来的提示条 / 按钮、
+# ["Enter", " "].includes(e.key)、解构出来的 key、e.code、html 的 onkeydown 属性。
+# 这些属于 code review。role / aria-hidden 的取值按浏览器的口径不分大小写。
 # ---------------------------------------------------------------------------
 
 _A11Y_SUFFIXES = (".html", ".js")
@@ -645,12 +648,17 @@ _ENTER_RE = re.compile(
     r"""\.key\s*(?:===?|!==?)\s*["']Enter["']"""
     r"""|["']Enter["']\s*(?:===?|!==?)\s*[\w$.]*\.key\b"""
     r"""|\bcase\s+["']Enter["']\s*:"""
+    r"""|\.(?:keyCode|which)\s*(?:===?|!==?)\s*13\b"""
 )
 
 
-def a11y_problems(pages_dir: Path | str) -> list[str]:
+def a11y_problems(
+    pages_dir: Path | str, *, skipped_names: Collection[str] = ASSET_NAMES
+) -> list[str]:
     """扫页面目录，回可访问性问题清单（``相对路径:行号: 怎么改``），空 = 全过。
 
+    ``skipped_names`` 是不扫的文件名：默认是 msui 落下的资产副本；页面里放了
+    改不了的第三方脚本时，把它的文件名加进来（``(*gate.ASSET_NAMES, "x.min.js")``）。
     接进测试::
 
         def test_a11y_gate():
@@ -664,10 +672,14 @@ def a11y_problems(pages_dir: Path | str) -> list[str]:
     for path in sorted(root.rglob("*")):
         if not path.is_file() or path.suffix not in _A11Y_SUFFIXES:
             continue
-        if path.name in ASSET_NAMES:
+        if path.name in skipped_names:
             continue
         rel = path.relative_to(root).as_posix()
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            problems.append(f"{rel}: 不是 UTF-8 编码，读不了——另存为 UTF-8（页面文件一律 UTF-8）")
+            continue
         if path.suffix == ".js":
             problems += _ime_enter_problems(text, rel)
         else:
@@ -690,10 +702,11 @@ def format_a11y_problems(problems: Iterable[str]) -> str:
 
 def _ime_enter_problems(text: str, rel: str, first_line: int = 1) -> list[str]:
     """一段 JS 文本里，比较 key 与 "Enter" 却不判断输入法的行。"""
-    lines = text.splitlines()
+    # 按 "\n" 切，不用 splitlines()：后者把 U+2028 这类字符也当换行，行号会偏。
+    lines = text.split("\n")
     problems = []
     for i, line in enumerate(lines):
-        if not _ENTER_RE.search(line):
+        if line.lstrip().startswith("//") or not _ENTER_RE.search(line):
             continue
         window = lines[max(0, i - _IME_GUARD_BEFORE) : i + _IME_GUARD_AFTER + 1]
         if any("isComposing" in near for near in window):
@@ -725,7 +738,7 @@ class _A11yHtmlChecker(HTMLParser):
         if tag == "button" and "icon" in self._classes(dict(attrs)):
             self._icon_button_depth += 1
         elif tag == "script" and not dict(attrs).get("src"):
-            self._script_line = self.getpos()[0]
+            self._script_line = 0  # 正文第一段到来时再取行号：开始标签可能跨行
             self._script_parts = []
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -740,8 +753,15 @@ class _A11yHtmlChecker(HTMLParser):
             )
             self._script_line = None
 
+    def close(self) -> None:
+        super().close()
+        if self._script_line is not None:  # <script> 没闭合：剩下的正文照样扫
+            self.handle_endtag("script")
+
     def handle_data(self, data: str) -> None:
         if self._script_line is not None:
+            if not self._script_parts:
+                self._script_line = self.getpos()[0]
             self._script_parts.append(data)
 
     @staticmethod
@@ -750,7 +770,7 @@ class _A11yHtmlChecker(HTMLParser):
 
     def _check(self, tag: str, attrs: Mapping[str, str | None]) -> None:
         classes = self._classes(attrs)
-        role = (attrs.get("role") or "").strip()
+        role = (attrs.get("role") or "").strip().lower()
         if "notice" in classes:
             if "error" in classes and role != "alert":
                 self.problems.append(
@@ -768,7 +788,8 @@ class _A11yHtmlChecker(HTMLParser):
                 self.problems.append(
                     f"{self._where()}: 图标按钮 button.icon 要写 aria-label（写明动作，如「清除」；title 不算）"
                 )
-        if tag == "svg" and self._icon_button_depth and attrs.get("aria-hidden") != "true":
+        hidden = (attrs.get("aria-hidden") or "").strip().lower()
+        if tag == "svg" and self._icon_button_depth and hidden != "true":
             self.problems.append(
                 f'{self._where()}: 图标按钮里的 <svg> 要写 aria-hidden="true"（读屏念按钮的 aria-label，不念图形）'
             )

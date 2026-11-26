@@ -165,7 +165,57 @@ def test_words_mentioning_enter_in_prose_are_not_handlers(tmp_path):
     assert gate.a11y_problems(tmp_path) == []
 
 
+def test_keycode_13_counts_as_an_enter_handler(tmp_path):
+    write(tmp_path, "a.js", "if (e.keyCode === 13) go();\n")
+    write(tmp_path, "b.js", "if (e.isComposing) return;\nif (e.which == 13) go();\n")
+    assert [p.split(":")[0] for p in gate.a11y_problems(tmp_path)] == ["a.js"]
+
+
+def test_a_commented_out_enter_handler_is_not_reported(tmp_path):
+    write(tmp_path, "app.js", '// if (e.key === "Enter") go();\n  // case "Enter":\n')
+    assert gate.a11y_problems(tmp_path) == []
+
+
+def test_script_tag_spanning_lines_reports_the_real_line(tmp_path):
+    write(tmp_path, "a.html", '<p>x</p>\n<script\n  type="module">\nif (e.key === "Enter") go();\n</script>\n')
+    problems = gate.a11y_problems(tmp_path)
+    assert len(problems) == 1 and problems[0].startswith("a.html:4:"), problems
+
+
+def test_line_separator_characters_do_not_shift_line_numbers(tmp_path):
+    write(tmp_path, "a.js", 'const s = "a\u2028b";\nif (e.key === "Enter") go();\n')
+    problems = gate.a11y_problems(tmp_path)
+    assert len(problems) == 1 and problems[0].startswith("a.js:2:"), problems
+
+
+def test_an_unclosed_script_is_still_scanned(tmp_path):
+    write(tmp_path, "a.html", '<body>\n<script>\nif (e.key === "Enter") go();\n')
+    assert len(gate.a11y_problems(tmp_path)) == 1
+
+
+def test_role_and_aria_hidden_values_are_case_insensitive(tmp_path):
+    write(
+        tmp_path,
+        "a.html",
+        '<p class="notice error" role="Alert"></p>'
+        '<button class="icon" aria-label="x"><svg aria-hidden="TRUE"></svg></button>',
+    )
+    assert gate.a11y_problems(tmp_path) == []
+
+
 # ---------------------------------------------------------------- 扫描范围
+
+
+def test_a_file_that_is_not_utf8_is_reported_not_raised(tmp_path):
+    (tmp_path / "gbk.js").write_bytes("// 中文\n".encode("gbk"))
+    problems = gate.a11y_problems(tmp_path)
+    assert len(problems) == 1 and "UTF-8" in problems[0], problems
+
+
+def test_third_party_scripts_can_be_skipped_by_name(tmp_path):
+    write(tmp_path, "vendor/lib.min.js", 'if(e.key==="Enter")go()')
+    assert len(gate.a11y_problems(tmp_path)) == 1
+    assert gate.a11y_problems(tmp_path, skipped_names=(*ASSET_NAMES, "lib.min.js")) == []
 
 
 def test_landed_msui_assets_are_skipped(tmp_path):

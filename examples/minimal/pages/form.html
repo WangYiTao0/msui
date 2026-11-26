@@ -6,9 +6,11 @@
   - 字段错误：出错的输入框写 aria-invalid="true"（红框），紧跟一行 .field-error 写原因，
     输入框用 aria-describedby 指向它；改对了（input 事件里）就把两样都收掉，不等下次保存；
   - 汇总错误写进 role="alert" 的 .notice.error，成功写进 role="status" 的 .notice.ok；
-  - 忙碌：调 Python 期间给按钮写 aria-busy="true"（转圈、点不动），应答回来去掉；
+  - 忙碌：调 Python 期间给按钮写 aria-busy="true"（转圈），应答回来去掉；它只是长相，
+    挡重复触发靠处理函数第一行判断 aria-busy（回车调的 click() 也走这里）；
+  - Python 侧 save_settings 回 {"errors": {字段 id: 原因}}（经 Serializer，页面读 reply.data），
+    没有错误就是空对象；
   - 未保存：改过没存时标题旁的 .pill.warn 亮「有未保存的改动」，「放弃改动」先用 <dialog> 确认；
-    关窗前的提醒由 Python 侧（pywebview 的 closing 事件）问页面 hasUnsaved()；
   - 回车：输入框里按回车 = 点保存，但先判断输入法（中文输入法按回车是确认候选词）。
   校验前先去掉首尾空格（Python 侧 .strip()），别因为多敲一个空格就报错。
 -->
@@ -21,7 +23,7 @@
 </head>
 <body>
   <h1>导出设置 <span class="pill warn" id="dirty" hidden>有未保存的改动</span></h1>
-  <p>改完点保存；没保存就关窗会先问你。</p>
+  <p>改完点保存；改过没存时标题旁会提示。</p>
   <div class="card">
     <div class="field">
       <label for="prefix">文件名前缀（必填）</label>
@@ -79,6 +81,7 @@
 
     $("save").addEventListener("click", async () => {
       const button = $("save");
+      if (button.getAttribute("aria-busy") === "true") return; // 上一次还没回来
       button.setAttribute("aria-busy", "true");
       let reply;
       try {

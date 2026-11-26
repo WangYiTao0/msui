@@ -82,12 +82,14 @@ button:disabled:hover, .btn:disabled:hover {
   color: var(--text-dim); background: transparent;
 }
 /* ---- 忙碌态（0.14.0 起）：调 Python 期间给触发按钮写 aria-busy="true" ----
-   点不动（pointer-events: none，连点不会再发请求）、光标转圈、文字前加一个
-   currentColor 的小圆圈在转；读屏念「忙」。应答回来把属性去掉。不用 disabled：
-   disabled 会把键盘焦点丢掉，用户 Tab 回来时找不到刚才那颗按钮。
-   图标按钮与开关不加圆圈（它们定宽、::after 另有用处），只换光标。 */
-button[aria-busy="true"], .btn[aria-busy="true"] { cursor: progress; pointer-events: none; }
-button[aria-busy="true"]:not(.icon):not(.switch)::before, .btn[aria-busy="true"]::before {
+   光标转圈、文字前加一个 currentColor 的小圆圈在转；应答回来把属性去掉。
+   **这只是长相，挡不住再点**：不写 pointer-events: none——那样光标不生效，点击
+   还会穿透到父元素（可点的卡片、表格行会被误触发），而且键盘的回车 / 空格本来
+   就挡不住。挡重复触发靠页面处理函数第一行判断 aria-busy（README §3 示例页），
+   桥的忙碌信封兜底。不用 disabled：它会把键盘焦点丢掉。
+   图标按钮（定宽 28px，放不下）与开关（::after 是滑块）不加圆圈，只换光标。 */
+button[aria-busy="true"], .btn[aria-busy="true"] { cursor: progress; }
+button[aria-busy="true"]:not(.icon):not(.switch)::before, .btn[aria-busy="true"]:not(.icon)::before {
   content: ""; display: inline-block; width: 10px; height: 10px; margin-right: 6px;
   vertical-align: -1px; border: 2px solid currentColor; border-right-color: transparent;
   border-radius: 50%; animation: msui-spin var(--motion-loop) linear infinite;
@@ -869,8 +871,9 @@ body.app .pane {
 :where(body.app .pane) > * + * { margin-top: var(--space-5); }
 /* 说明段的行长（0.14.0 起）：小窗靠 --content-max 限住，主区能拉到上千 px，
    一行几百个字读到行尾就找不回下一行开头。--measure 档（72ch）在 13px 下约 40
-   个汉字；提示条不限（它要和上下的卡片同宽）。 */
-:where(body.app .pane) p:not(.notice) { max-width: var(--measure); }
+   个汉字；提示条不限（它要和上下的卡片同宽）。整条包在 :where() 里，特异性为 0：
+   某一段要放开时写一个类（.wide { max-width: none }）就压得过。 */
+:where(body.app .pane) :where(p:not(.notice)) { max-width: var(--measure); }
 
 /* ---- 窄窗（< 900px）：左栏退到上面 ----
    定宽左栏在窄窗里会把主区挤到只剩一条，改成上下排：.cols 竖排，左栏的右边线

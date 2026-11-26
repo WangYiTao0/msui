@@ -1487,30 +1487,38 @@ base.css，行为在 msui 落下来的 `runlog.js`——**页面不写轮询和�
 |---|---|---|
 | 提示条 `.notice.error` 写 `role="alert"`，其余 `.notice` 写 `role="status"` | 它是 JS 改字 / 取消 `hidden` 才出现的，不写 role 读屏不念 | 文件:行号 + 该写哪个 role |
 | 图标按钮 `button.icon` 写 `aria-label`（写明动作），里面的 `<svg>` 写 `aria-hidden="true"` | 读屏念动作，不念一串路径；`title` 只在悬停时出现，不算名称 | 缺名称 / svg 没隐藏 |
-| 回车处理先判断输入法：`if (event.isComposing \|\| event.keyCode === 229) return;` | 中文输入法里按回车是「确认候选词」，keydown 的 key 照样是 `"Enter"`；不判断，用户敲个中文路径按回车选字就提前保存了 | 比较 key 与 `"Enter"` 那一行附近（往上 6 行、往下 2 行）没有 `isComposing` |
+| 回车处理先判断输入法：`if (event.isComposing \|\| event.keyCode === 229) return;` | 中文输入法里按回车是「确认候选词」，keydown 的 key 照样是 `"Enter"`；不判断，用户敲个中文路径按回车选字就提前保存了 | 比较 key 与 `"Enter"`（或 keyCode / which 与 13）那一行附近（往上 6 行、往下 2 行）没有 `isComposing` |
 
-检查只看静态文本：JS 运行时才拼出来的提示条和按钮看不到，那部分靠 review。
+检查只看静态文本，下面这些看不到，靠 review：JS 运行时才拼出来的提示条和按钮、
+`["Enter", " "].includes(e.key)`、解构出来的 `key`、`e.code`、html 的 `onkeydown`
+属性。`pages/` 里放了改不了的第三方脚本时，把文件名加进排除清单：
+`gate.a11y_problems(PAGES, skipped_names=(*gate.ASSET_NAMES, "lib.min.js"))`。
+不是 UTF-8 的文件会报一条「读不了」，不会抛异常。
 
 **页面要写的**，没有检查（照下面的示例页写）：
 
 - **必填**：标签后写「（必填）」，输入框写 `required`；
-- **字段错误写在字段旁边**：Python 侧按字段回错误（`{"prefix": "不能含斜杠"}`），
+- **字段错误写在字段旁边**：Python 侧按字段回错误（`{"errors": {"prefix": "不能含斜杠"}}`，
+  经 Serializer 后页面读 `reply.data.errors`；没错就是空对象），
   页面给出错的输入框写 `aria-invalid="true"`（变红框），紧跟一行
   `<p class="field-error">` 写原因、输入框 `aria-describedby` 指向它；在 `.field`
   里它自动独占一行、和输入框左对齐。**改对了就收掉**：在 `input` 事件里把
   `aria-invalid` 和那行字一起去掉，不等下次点保存。几项都错时，顶上再放一条
   `role="alert"` 的 `.notice.error` 说「有 N 项要改」；
 - **校验前先去首尾空格**（Python 侧 `.strip()`），别因为多敲一个空格报错；
-- **调 Python 期间按钮写 `aria-busy="true"`**：按钮前出现一个转圈、点不动、读屏
-  念「忙」，应答回来（`finally` 里）去掉。不用 `disabled`：它会把键盘焦点弄丢。
-  桥的忙碌信封照旧兜底（连点丢弃）；`aria-busy` 是让人看得见「点上了」；
+- **调 Python 期间按钮写 `aria-busy="true"`**：按钮前出现一个转圈、光标转圈，
+  应答回来（`finally` 里）去掉。**它只是长相，挡不住再点**（键盘回车、代码里的
+  `click()` 都照样触发）：处理函数第一行写
+  `if (button.getAttribute("aria-busy") === "true") return;`，桥的忙碌信封再兜底。
+  不用 `disabled`：它会把键盘焦点弄丢。读屏软件对按钮上的 `aria-busy` 支持不一，
+  要念出来就另把「正在保存…」写进 `role="status"` 的提示条；
 - **未保存的改动**：改过没存时亮一颗 `.pill.warn`「有未保存的改动」；「放弃改动」
-  先用 `<dialog>` 确认；关窗时 Python 侧（pywebview 的 `closing` 事件）调页面的
-  `hasUnsaved()`，为真就问一句再关。页面之间切换用 `hidden` 收放、DOM 不销毁
-  的话，切页不会丢改动，不用拦；
+  先用 `<dialog>` 确认。页面之间切换用 `hidden` 收放、DOM 不销毁的话，切页不会
+  丢改动，不用拦。**关窗前提醒 msui 还没有示范**（pywebview 的 `closing` 事件里
+  怎么问页面、会不会卡住，还没在 WebView2 上验过），需要的程序先开票回 msui；
 - **过滤后 0 条也要有空态**：搜索或筛选后表格没有行时，出一行
-  `<tr class="empty"><td colspan="N">没有符合的记录</td></tr>`，并给「清除筛选」
-  按钮；别只留一个空表头。
+  `<tr><td colspan="N" class="wrap"><div class="empty"><div class="title">没有符合的记录</div><button type="button">清除筛选</button></div></td></tr>`
+  （`.empty` 是现成的空态块，放进单元格里用），别只留一个空表头。
 
 ```html
 <!-- examples/minimal/pages/form.html -->
@@ -1522,9 +1530,11 @@ base.css，行为在 msui 落下来的 `runlog.js`——**页面不写轮询和�
   - 字段错误：出错的输入框写 aria-invalid="true"（红框），紧跟一行 .field-error 写原因，
     输入框用 aria-describedby 指向它；改对了（input 事件里）就把两样都收掉，不等下次保存；
   - 汇总错误写进 role="alert" 的 .notice.error，成功写进 role="status" 的 .notice.ok；
-  - 忙碌：调 Python 期间给按钮写 aria-busy="true"（转圈、点不动），应答回来去掉；
+  - 忙碌：调 Python 期间给按钮写 aria-busy="true"（转圈），应答回来去掉；它只是长相，
+    挡重复触发靠处理函数第一行判断 aria-busy（回车调的 click() 也走这里）；
+  - Python 侧 save_settings 回 {"errors": {字段 id: 原因}}（经 Serializer，页面读 reply.data），
+    没有错误就是空对象；
   - 未保存：改过没存时标题旁的 .pill.warn 亮「有未保存的改动」，「放弃改动」先用 <dialog> 确认；
-    关窗前的提醒由 Python 侧（pywebview 的 closing 事件）问页面 hasUnsaved()；
   - 回车：输入框里按回车 = 点保存，但先判断输入法（中文输入法按回车是确认候选词）。
   校验前先去掉首尾空格（Python 侧 .strip()），别因为多敲一个空格就报错。
 -->
@@ -1537,7 +1547,7 @@ base.css，行为在 msui 落下来的 `runlog.js`——**页面不写轮询和�
 </head>
 <body>
   <h1>导出设置 <span class="pill warn" id="dirty" hidden>有未保存的改动</span></h1>
-  <p>改完点保存；没保存就关窗会先问你。</p>
+  <p>改完点保存；改过没存时标题旁会提示。</p>
   <div class="card">
     <div class="field">
       <label for="prefix">文件名前缀（必填）</label>
@@ -1595,6 +1605,7 @@ base.css，行为在 msui 落下来的 `runlog.js`——**页面不写轮询和�
 
     $("save").addEventListener("click", async () => {
       const button = $("save");
+      if (button.getAttribute("aria-busy") === "true") return; // 上一次还没回来
       button.setAttribute("aria-busy", "true");
       let reply;
       try {
@@ -2153,7 +2164,15 @@ class Api:
 ## 从 0.13.x 升到 0.14.0
 
 0.14.0 补的是可访问性：一个新检查函数、几样 base.css 现成的样子、一节写法规范。
-**接口不变，升级本身不会让测试变红**；把新检查抄进测试后，按它报的位置改页面。
+接口不变。**升级本身一般不会让测试变红**，唯一的例外是「不重定义 base.css」那条
+闸门：base.css 新加了下面这些选择器，自己的 css 里写过其中任何一条，升级后会被
+报出来，删掉自己那条即可（0.14.0 的已经做了同样的事）：
+
+`:focus-visible`、`.search input:focus-visible`、`.search:has(input:focus-visible)`、
+`input[aria-invalid="true"]`（及 `textarea` / `select` / `.input` 同款）、`.field-error`、
+`.field > .field-error`、`button[aria-busy="true"]`、`.btn[aria-busy="true"]`。
+
+把新检查抄进测试后，按它报的位置改页面。
 
 1. **钉版本几处一起改**：`requirements.txt` 那行 wheel URL 里的两处版本号（路径段
    `v0.14.0` + 文件名 `msui-0.14.0-…`），加上冒烟里的 `MSUI_PINNED` 常量；
@@ -2161,9 +2180,7 @@ class Api:
    `文件:行号` 改——通常是给 `.notice` 补 `role`、给 `button.icon` 补
    `aria-label` 和 svg 的 `aria-hidden`、给回车处理补一行输入法判断；
 3. **看得见的变化**（不用改代码）：
-   - 小窗版式里 Tab 或点进输入框，会出现一圈蓝色焦点环（原来只有 `body.app` 有）。
-     自己的 `layout.css` 里如果写过全局 `:focus-visible`，**删掉**——它现在是
-     base.css 的选择器，留着会被「不重定义 base.css」那条闸门报出来；
+   - 小窗版式里 Tab 或点进输入框，会出现一圈蓝色焦点环（原来只有 `body.app` 有）；
    - 深色主题下的下拉列表、日期框、复选框改按深色画；
    - 应用式主区里的说明段最宽 72ch；
 4. **可选**：表单页照 §3「可访问性」的示例页改成字段级错误（`aria-invalid` +
@@ -2421,8 +2438,9 @@ class Api:
     确认候选词）。表单：必填标签写「（必填）」+ required；出错的输入框写
     aria-invalid="true"，紧跟 <p class="field-error"> 写原因、aria-describedby
     指过去，改对了在 input 事件里收掉；调 Python 期间按钮写 aria-busy="true"
-    （不用 disabled）；改过没存亮 .pill.warn「有未保存的改动」，放弃先用 dialog
-    确认，关窗前问页面 hasUnsaved()；过滤后 0 条出一行 tr.empty。焦点环、动效
+    （不用 disabled；处理函数第一行判断 aria-busy 挡重复触发）；改过没存亮
+    .pill.warn「有未保存的改动」，放弃先用 dialog 确认；过滤后 0 条在表里放一行
+    跨满列的单元格，里面放 .empty 空态块和「清除筛选」。焦点环、动效
     节奏（--motion-*）、主区段落行宽（--measure）、深色原生控件都由 base.css
     / tokens.css 做好，不自己写 :focus-visible、不写字面 ms。
 ```

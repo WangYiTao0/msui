@@ -1605,7 +1605,7 @@ def test_dark_tokens_declare_the_dark_color_scheme():
 
 def test_wide_pane_paragraphs_keep_a_readable_measure():
     """小窗靠 --content-max 限住行长；应用式主区能拉到上千 px，说明段要自己限。提示条不限。"""
-    assert "max-width: var(--measure)" in rule(":where(body.app .pane) p:not(.notice)")
+    assert "max-width: var(--measure)" in rule(":where(body.app .pane) :where(p:not(.notice))")
 
 
 INVALID_SELECTOR = (
@@ -1629,12 +1629,13 @@ def test_field_error_text_is_small_error_coloured_and_lines_up_under_the_input()
 
 
 BUSY = 'button[aria-busy="true"], .btn[aria-busy="true"]'
-SPINNER = 'button[aria-busy="true"]:not(.icon):not(.switch)::before, .btn[aria-busy="true"]::before'
+SPINNER = 'button[aria-busy="true"]:not(.icon):not(.switch)::before, .btn[aria-busy="true"]:not(.icon)::before'
 
 
-def test_busy_button_ignores_pointer_and_shows_a_token_coloured_spinner():
+def test_busy_button_shows_a_progress_cursor_and_a_token_coloured_spinner():
     assert "cursor: progress" in rule(BUSY)
-    assert "pointer-events: none" in rule(BUSY)
+    # 不许 pointer-events: none：光标会失效、点击穿透到父元素（审核实测 elementFromPoint 取到父元素）
+    assert "pointer-events" not in rule(BUSY)
     spin = rule(SPINNER)
     assert "border: 2px solid currentColor" in spin
     assert "animation: msui-spin var(--motion-loop) linear infinite" in spin
