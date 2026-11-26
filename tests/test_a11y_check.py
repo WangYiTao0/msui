@@ -195,7 +195,8 @@ def test_line_separator_characters_do_not_shift_line_numbers(tmp_path):
 
 def test_an_unclosed_script_is_still_scanned(tmp_path):
     write(tmp_path, "a.html", '<body>\n<script>\nif (e.key === "Enter") go();\n')
-    assert len(gate.a11y_problems(tmp_path)) == 1
+    problems = gate.a11y_problems(tmp_path)
+    assert len(problems) == 1 and problems[0].startswith("a.html:3:"), problems
 
 
 def test_role_and_aria_hidden_values_are_case_insensitive(tmp_path):
