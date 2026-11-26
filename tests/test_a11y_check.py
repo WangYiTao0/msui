@@ -176,6 +176,11 @@ def test_a_commented_out_enter_handler_is_not_reported(tmp_path):
     assert gate.a11y_problems(tmp_path) == []
 
 
+def test_a_commented_out_guard_does_not_count(tmp_path):
+    write(tmp_path, "app.js", '// if (e.isComposing) return;\nif (e.key === "Enter") go();\n')
+    assert len(gate.a11y_problems(tmp_path)) == 1
+
+
 def test_script_tag_spanning_lines_reports_the_real_line(tmp_path):
     write(tmp_path, "a.html", '<p>x</p>\n<script\n  type="module">\nif (e.key === "Enter") go();\n</script>\n')
     problems = gate.a11y_problems(tmp_path)

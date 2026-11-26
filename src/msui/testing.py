@@ -709,7 +709,7 @@ def _ime_enter_problems(text: str, rel: str, first_line: int = 1) -> list[str]:
         if line.lstrip().startswith("//") or not _ENTER_RE.search(line):
             continue
         window = lines[max(0, i - _IME_GUARD_BEFORE) : i + _IME_GUARD_AFTER + 1]
-        if any("isComposing" in near for near in window):
+        if any("isComposing" in near and not near.lstrip().startswith("//") for near in window):
             continue
         problems.append(
             f"{rel}:{first_line + i}: 回车处理没判断输入法——在同一个处理函数开头写 "

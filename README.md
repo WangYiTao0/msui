@@ -1503,7 +1503,7 @@ base.css，行为在 msui 落下来的 `runlog.js`——**页面不写轮询和�
   页面给出错的输入框写 `aria-invalid="true"`（变红框），紧跟一行
   `<p class="field-error">` 写原因、输入框 `aria-describedby` 指向它；在 `.field`
   里它自动独占一行、和输入框左对齐。**改对了就收掉**：在 `input` 事件里把
-  `aria-invalid` 和那行字一起去掉，不等下次点保存。几项都错时，顶上再放一条
+  `aria-invalid` 设为 `"false"`（或去掉）、那行字藏起来，不等下次点保存。几项都错时，顶上再放一条
   `role="alert"` 的 `.notice.error` 说「有 N 项要改」；
 - **校验前先去首尾空格**（Python 侧 `.strip()`），别因为多敲一个空格报错；
 - **调 Python 期间按钮写 `aria-busy="true"`**：按钮前出现一个转圈、光标转圈，
@@ -2170,7 +2170,9 @@ class Api:
 
 `:focus-visible`、`.search input:focus-visible`、`.search:has(input:focus-visible)`、
 `input[aria-invalid="true"]`（及 `textarea` / `select` / `.input` 同款）、`.field-error`、
-`.field > .field-error`、`button[aria-busy="true"]`、`.btn[aria-busy="true"]`。
+`.field > .field-error`、`button[aria-busy="true"]`、`.btn[aria-busy="true"]`、
+`button[aria-busy="true"]:not(.icon):not(.switch)::before`、
+`.btn[aria-busy="true"]:not(.icon)::before`、`:where(body.app .pane) :where(p:not(.notice))`。
 
 把新检查抄进测试后，按它报的位置改页面。
 
