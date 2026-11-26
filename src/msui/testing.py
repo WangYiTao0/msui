@@ -1,6 +1,7 @@
 """消费者的测试零件：样式闸门纯函数 + 冒烟自动驾驶骨架。**不依赖 pytest。**
 
-三块内容：样式闸门（对比度校验 + 防游离色值扫描，本文件主体）、图标检查
+四块内容：样式闸门（对比度校验 + 防游离色值扫描，本文件主体）、可访问性检查
+:func:`a11y_problems`（0.14.0 起，见该节注释）、图标检查
 :func:`icon_problems`（0.13.0 起，见该节注释）与
 :class:`SmokeDriver`（APP_SMOKE 冒烟的自动驾驶骨架，见类 docstring）。
 
@@ -54,6 +55,7 @@ import time
 import tomllib
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -85,8 +87,10 @@ __all__ = [
     "TEXT_MINIMUM",
     "THEMES",
     "TokenPair",
+    "a11y_problems",
     "contrast_failures",
     "contrast_ratio",
+    "format_a11y_problems",
     "format_base_redefinitions",
     "format_contrast_failures",
     "format_stray_hex",
@@ -189,6 +193,12 @@ NON_HEX_TOKENS = frozenset(
         "content-max",  # 内容列宽（body 即容器的 max-width）——量值，不是颜色
         "field-label",  # 表单行的标签列宽（.field 的对齐基准）——量值，不是颜色
         "rail-width",  # 应用式版式左栏 .rail 的宽——量值，不是颜色
+        "measure",  # 应用式主区说明段的行长——量值，不是颜色（0.14.0）
+        "motion-fast",  # 动效节奏：即时反馈时长——量值，不是颜色（0.14.0）
+        "motion-enter",  # 动效节奏：进场时长
+        "motion-stagger",  # 动效节奏：进场错峰间隔
+        "motion-loop",  # 动效节奏：持续动画一圈
+        "ease-enter",  # 动效节奏：进场缓动曲线
         "error-bg",  # error 系半透明底
         "error-strip-border",  # error 系半透明边框
         "error-wash",  # error 系 hover 提亮罩
@@ -609,6 +619,188 @@ def format_base_redefinitions(offenders: Mapping[Path, list[str]]) -> str:
         + "\n".join(f"  {path}: {hits}" for path, hits in offenders.items())
         + "\n换个自己的类名写；别的小程序也会要的改动，开票回 msui。"
     )
+
+
+# ---------------------------------------------------------------------------
+# 可访问性检查（0.14.0 起）：三根静态绊线
+#
+# 扫页面目录下的 .html 与 .js（含 html 里的内联 <script>），跳过 copy_assets
+# 落下的 msui 资产副本（原件由包自己的测试把关）。三条规则：
+#   1. 提示条 .notice 写 role——它是 JS 改字 / 取消 hidden 才出现的，不写 role
+#      读屏软件不念：error 态写 role="alert"，其余写 role="status"（要打断也可
+#      以写 alert）；
+#   2. 图标按钮 button.icon 有可访问名称（aria-label / aria-labelledby；title
+#      不算——它只在悬停时出现、读屏也不保证念），里面的 <svg> 写
+#      aria-hidden="true"；
+#   3. 回车处理判断输入法——中文输入法里按回车是「确认候选词」，keydown 的
+#      key 照样是 "Enter"。比较 key 与 "Enter"（或 keyCode / which 与 13）的那一
+#      行，往上 6 行、往下 2 行内要出现 isComposing。这是按行距的近似：守卫写在
+#      很远的地方也算没写；整行是 // 注释的不算。
+# 只看静态文本，认不出的写法会漏：JS 运行时才拼出来的提示条 / 按钮、
+# ["Enter", " "].includes(e.key)、解构出来的 key、e.code、html 的 onkeydown 属性。
+# 这些属于 code review。role / aria-hidden 的取值按浏览器的口径不分大小写。
+# ---------------------------------------------------------------------------
+
+_A11Y_SUFFIXES = (".html", ".js")
+_IME_GUARD_BEFORE = 6
+_IME_GUARD_AFTER = 2
+_ENTER_RE = re.compile(
+    r"""\.key\s*(?:===?|!==?)\s*["']Enter["']"""
+    r"""|["']Enter["']\s*(?:===?|!==?)\s*[\w$.]*\.key\b"""
+    r"""|\bcase\s+["']Enter["']\s*:"""
+    r"""|\.(?:keyCode|which)\s*(?:===?|!==?)\s*13\b"""
+)
+
+
+def a11y_problems(
+    pages_dir: Path | str, *, skipped_names: Collection[str] = ASSET_NAMES
+) -> list[str]:
+    """扫页面目录，回可访问性问题清单（``相对路径:行号: 怎么改``），空 = 全过。
+
+    ``skipped_names`` 是不扫的文件名：默认是 msui 落下的资产副本；页面里放了
+    改不了的第三方脚本时，把它的文件名加进来（``(*gate.ASSET_NAMES, "x.min.js")``）。
+    接进测试::
+
+        def test_a11y_gate():
+            problems = gate.a11y_problems(PAGES)
+            assert not problems, gate.format_a11y_problems(problems)
+    """
+    root = Path(pages_dir)
+    if not root.is_dir():
+        return [f"{root}: 页面目录不存在"]
+    problems: list[str] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file() or path.suffix not in _A11Y_SUFFIXES:
+            continue
+        if path.name in skipped_names:
+            continue
+        rel = path.relative_to(root).as_posix()
+        try:
+            text = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            problems.append(f"{rel}: 不是 UTF-8 编码，读不了——另存为 UTF-8（页面文件一律 UTF-8）")
+            continue
+        if path.suffix == ".js":
+            problems += _ime_enter_problems(text, rel)
+        else:
+            checker = _A11yHtmlChecker(rel)
+            checker.feed(text)
+            checker.close()
+            problems += checker.problems
+    return problems
+
+
+def format_a11y_problems(problems: Iterable[str]) -> str:
+    """把问题清单排成人话，一条一行。"""
+    problems = list(problems)
+    if not problems:
+        return ""
+    return "以下位置不满足 msui 的可访问性约定（README「可访问性」一节）：\n" + "\n".join(
+        f"  {p}" for p in problems
+    )
+
+
+def _ime_enter_problems(text: str, rel: str, first_line: int = 1) -> list[str]:
+    """一段 JS 文本里，比较 key 与 "Enter" 却不判断输入法的行。"""
+    # 按 "\n" 切，不用 splitlines()：后者把 U+2028 这类字符也当换行，行号会偏。
+    lines = text.split("\n")
+    problems = []
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("//") or not _ENTER_RE.search(line):
+            continue
+        window = lines[max(0, i - _IME_GUARD_BEFORE) : i + _IME_GUARD_AFTER + 1]
+        if any("isComposing" in near and not near.lstrip().startswith("//") for near in window):
+            continue
+        problems.append(
+            f"{rel}:{first_line + i}: 回车处理没判断输入法——在同一个处理函数开头写 "
+            "`if (event.isComposing || event.keyCode === 229) return;`"
+            "（中文输入法按回车是确认候选词，不判断会提前提交）"
+        )
+    return problems
+
+
+class _A11yHtmlChecker(HTMLParser):
+    """逐个标签看提示条 role、图标按钮名称与 svg 隐藏；内联脚本转给回车规则。"""
+
+    def __init__(self, rel: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rel = rel
+        self.problems: list[str] = []
+        self._icon_button_depth = 0  # 当前在几层 button.icon 里（正常只会是 0 / 1）
+        self._script_line: int | None = None
+        self._script_parts: list[str] = []
+
+    def _where(self) -> str:
+        return f"{self.rel}:{self.getpos()[0]}"
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._check(tag, dict(attrs))
+        if tag == "button" and "icon" in self._classes(dict(attrs)):
+            self._icon_button_depth += 1
+        elif tag == "script" and not dict(attrs).get("src"):
+            self._script_line = 0  # 正文第一段到来时再取行号：开始标签可能跨行
+            self._script_parts = []
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._check(tag, dict(attrs))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "button" and self._icon_button_depth:
+            self._icon_button_depth -= 1
+        elif tag == "script" and self._script_line is not None:
+            self.problems += _ime_enter_problems(
+                "".join(self._script_parts), self.rel, self._script_line
+            )
+            self._script_line = None
+
+    def close(self) -> None:
+        # <script> 没闭合：剩下的正文照样扫。收尾时把它交不交给 handle_data，各补丁
+        # 版本不一样（3.12.10 不交、更新的版本交），所以先记下没处理的原始文本自己补。
+        pending, line = self.rawdata, self.getpos()[0]
+        delivered = len(self._script_parts)
+        super().close()
+        if self._script_line is not None:
+            if pending and len(self._script_parts) == delivered:
+                if not self._script_parts:
+                    self._script_line = line
+                self._script_parts.append(pending)
+            self.handle_endtag("script")
+
+    def handle_data(self, data: str) -> None:
+        if self._script_line is not None:
+            if not self._script_parts:
+                self._script_line = self.getpos()[0]
+            self._script_parts.append(data)
+
+    @staticmethod
+    def _classes(attrs: Mapping[str, str | None]) -> list[str]:
+        return (attrs.get("class") or "").split()
+
+    def _check(self, tag: str, attrs: Mapping[str, str | None]) -> None:
+        classes = self._classes(attrs)
+        role = (attrs.get("role") or "").strip().lower()
+        if "notice" in classes:
+            if "error" in classes and role != "alert":
+                self.problems.append(
+                    f'{self._where()}: 错误提示条 .notice.error 要写 role="alert"（出现时读屏软件立刻念）'
+                )
+            elif "error" not in classes and role not in ("alert", "status"):
+                self.problems.append(
+                    f'{self._where()}: 提示条 .notice 要写 role="status"（要打断用户时写 role="alert"）'
+                )
+        if tag == "button" and "icon" in classes:
+            named = (attrs.get("aria-label") or "").strip() or (
+                attrs.get("aria-labelledby") or ""
+            ).strip()
+            if not named:
+                self.problems.append(
+                    f"{self._where()}: 图标按钮 button.icon 要写 aria-label（写明动作，如「清除」；title 不算）"
+                )
+        hidden = (attrs.get("aria-hidden") or "").strip().lower()
+        if tag == "svg" and self._icon_button_depth and hidden != "true":
+            self.problems.append(
+                f'{self._where()}: 图标按钮里的 <svg> 要写 aria-hidden="true"（读屏念按钮的 aria-label，不念图形）'
+            )
 
 
 # ---------------------------------------------------------------------------

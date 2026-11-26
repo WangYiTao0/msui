@@ -144,6 +144,7 @@
       if (step) pick(step);
     });
     steps.addEventListener("keydown", (event) => {
+      if (event.isComposing || event.keyCode === 229) return; // 输入法确认候选词的回车不算
       if (event.key !== "Enter" && event.key !== " ") return;
       if (!event.target.classList.contains("step")) return;
       event.preventDefault();

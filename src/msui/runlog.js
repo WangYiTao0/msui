@@ -137,6 +137,7 @@
       };
       head.addEventListener("click", flip);
       head.addEventListener("keydown", function (event) {
+        if (event.isComposing || event.keyCode === 229) return; // 输入法确认候选词的回车不算
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
         flip();
